@@ -67,11 +67,11 @@ numerics:
   mesh_barrier_ratio: 0.04           # mesh_size / barrier_height
   
   # Time integration
-  cfl_factor: 0.5                    # CFL stability condition
-  max_timestep: 1.0e-4               # s, maximum allowed timestep
+  cfl_factor: 0.1                    # 减小CFL因子提高稳定性
+  max_timestep: 1.0e-5               # s, 减小时间步长提高稳定性
   
   # Solver tolerances
-  pressure_tolerance: 1.0e-6         # incompressible fluid solver
+  pressure_tolerance: 1.0e-4         # 放宽压力求解器容差
   contact_tolerance: 1.0e-8          # barrier contact detection
   contact_stiffness: 100000000.0     # N/m, barrier contact stiffness
   contact_damping: 1000.0            # N·s/m, barrier contact damping

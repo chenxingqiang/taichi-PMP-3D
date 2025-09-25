@@ -238,7 +238,7 @@ class PCGSolver:
             else:
                 self.r[i, j, k] = 0.0
     
-    def solve_pcg(self, div_v_star, max_iter=100, tol=1e-6):
+    def solve_pcg(self, div_v_star, max_iter=200, tol=1e-4):
         """Solve pressure Poisson equation using PCG"""
         # Setup RHS
         self.setup_rhs(div_v_star)
