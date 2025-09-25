@@ -118,12 +118,11 @@ class BarrierModel:
                     damping_force = -self.contact_damping * relative_velocity
                     
                     # Coulomb friction (tangential component)
+                    friction_force = ti.Vector([0.0, 0.0, 0.0])
                     if ti.abs(normal_force_magnitude) > 1e-12:
                         friction_force_magnitude = self.friction_coefficient * normal_force_magnitude
                         friction_force = -friction_force_magnitude * ti.Vector([0.0, vel.y, vel.z])
                         friction_force = friction_force / (ti.sqrt(vel.y**2 + vel.z**2 + 1e-12))
-                    else:
-                        friction_force = ti.Vector([0.0, 0.0, 0.0])
                     
                     # Total contact force
                     contact_force = normal_force + damping_force + friction_force
@@ -177,7 +176,7 @@ class BarrierModel:
                     
                     # Analytical landing distance (Equation 3)
                     g = 9.81  # Gravity
-                    theta = 20.0 * ti.pi / 180.0  # Slope angle (radians)
+                    theta = 20.0 * 3.14159265359 / 180.0  # Slope angle (radians)
                     
                     # Simplified trajectory calculation
                     # xi = (v²launch)/(g*cosθ) * [tanθ + √(tan²θ + 2g*HB/(v²launch*cosθ))] + HB*tanθ
@@ -261,7 +260,7 @@ class BarrierModel:
         
         return landing_distance
     
-    def get_impact_statistics(self) -> Dict[str, float]:
+    def get_impact_statistics(self) -> Dict[str, Any]:
         """Get current impact force statistics."""
         return {
             'total_impact_force': self.total_impact_force[None].to_numpy(),

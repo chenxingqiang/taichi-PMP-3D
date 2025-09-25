@@ -259,6 +259,10 @@ class LevelSetMethod:
         dz_minus = (phi_center - phi_km1) * self.inv_dx
         
         # Choose upwind direction based on sign
+        dx = 0.0
+        dy = 0.0
+        dz = 0.0
+        
         if sign_phi > 0:
             dx = ti.max(ti.max(-dx_plus, 0.0), ti.min(-dx_minus, 0.0))
             dy = ti.max(ti.max(-dy_plus, 0.0), ti.min(-dy_minus, 0.0))

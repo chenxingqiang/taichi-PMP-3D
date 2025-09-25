@@ -82,6 +82,9 @@ class IncompressibleMPMSolver:
         self.pcg_solver = PCGSolver(nx, ny, nz, dx, rho, dt)
         self.pcg_solver.set_surface_tension(gamma)
         
+        # Contact forces
+        self.contact_forces = ti.Vector.field(3, dtype=ti.f64, shape=max_particles)
+        
         # Statistics
         self.total_kinetic_energy = ti.field(dtype=ti.f64, shape=())
         self.max_velocity = ti.field(dtype=ti.f64, shape=())
@@ -385,6 +388,33 @@ class IncompressibleMPMSolver:
         positions = self.x.to_numpy()[:self.n_particles[None]]
         velocities = self.v.to_numpy()[:self.n_particles[None]]
         return positions, velocities
+    
+    def export_vtk(self, filename: str):
+        """Export particle data to VTK file for visualization"""
+        positions, velocities = self.export_particles_to_numpy()
+        
+        if len(positions) == 0:
+            print(f"Warning: No particles to export to {filename}")
+            return
+        
+        # Create a simple VTK file
+        with open(filename, 'w') as f:
+            f.write("# vtk DataFile Version 3.0\n")
+            f.write("MPM Particle Data\n")
+            f.write("ASCII\n")
+            f.write("DATASET POLYDATA\n")
+            f.write(f"POINTS {len(positions)} float\n")
+            
+            for pos in positions:
+                f.write(f"{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}\n")
+            
+            f.write(f"POINT_DATA {len(positions)}\n")
+            f.write("VECTORS velocity float\n")
+            
+            for vel in velocities:
+                f.write(f"{vel[0]:.6f} {vel[1]:.6f} {vel[2]:.6f}\n")
+        
+        print(f"Exported {len(positions)} particles to {filename}")
 
     @ti.kernel
     def compute_statistics(self):

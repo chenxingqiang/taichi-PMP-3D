@@ -28,13 +28,13 @@ class OutputMetricsCalculator:
             self.config = yaml.safe_load(f)
         
         # Physical parameters
-        self.rho_s = self.config['materials']['solid']['density']
-        self.rho_f = self.config['materials']['fluid']['density']
-        self.phi_m = self.config['materials']['solid']['critical_volume_fraction']
-        self.mu_1 = self.config['materials']['solid']['friction_coefficients']['mu_1']
-        self.mu_2 = self.config['materials']['solid']['friction_coefficients']['mu_2']
-        self.d = self.config['materials']['solid']['particle_diameter']
-        self.eta_f = self.config['materials']['fluid']['dynamic_viscosity']
+        self.rho_s = self.config['solid_phase']['density']
+        self.rho_f = self.config['fluid_phase']['density']
+        self.phi_m = self.config['solid_phase']['critical_solid_fraction']
+        self.mu_1 = self.config['solid_phase']['static_friction']
+        self.mu_2 = self.config['solid_phase']['limiting_friction']
+        self.d = self.config['solid_phase']['particle_diameter']
+        self.eta_f = self.config['fluid_phase']['viscosity']
         
         # Simulation parameters
         self.g = self.config['simulation']['gravity']

@@ -41,6 +41,19 @@ domain:
   aspect_ratio: 8.0                  # -, initial debris length/height ratio
   barrier_height_factor: 2.0         # -, HB = 2*hflow
 
+# Simulation Parameters
+simulation:
+  total_time: 5.0                    # s, total simulation time
+  gravity: 9.81                      # m/s², gravitational acceleration
+  slope_angle: 20.0                  # degrees, channel inclination
+  barrier_height: 0.15               # m, barrier height
+  barrier_spacing: 2.0               # m, distance between barriers
+  barrier_positions: [3.0, 5.0]      # m, x-positions of barriers
+  debris_volume: 500.0               # m³, initial debris volume
+  domain_length: 10.0                # m, simulation domain length
+  domain_width: 1.0                  # m, simulation domain width
+  domain_height: 1.0                 # m, simulation domain height
+
 # Froude Number Test Cases
 froude_numbers: [2.0, 4.0, 6.0]     # -, dimensionless flow regimes
 
@@ -60,6 +73,8 @@ numerics:
   # Solver tolerances
   pressure_tolerance: 1.0e-6         # incompressible fluid solver
   contact_tolerance: 1.0e-8          # barrier contact detection
+  contact_stiffness: 100000000.0     # N/m, barrier contact stiffness
+  contact_damping: 1000.0            # N·s/m, barrier contact damping
   
   # Output control
   vtk_output_interval: 100           # timesteps between VTK exports
@@ -174,7 +189,7 @@ validation_data:
     max_distance_fr6: 24.0           # normalized by hflow for Fr=6
     velocity_increase: 0.8           # up to 80% velocity increase after landing
 
-# Performance Benchmarks  
+# Performance Benchmarks
 performance_targets:
   memory_usage: 8.0                  # GB, maximum GPU memory for 500m³ simulation
   throughput: 500.0                  # MLUPS, million lattice updates per second
