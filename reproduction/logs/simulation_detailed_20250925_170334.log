@@ -1,0 +1,5 @@
+2025-09-25 17:03:34,603 - MPMSimulation - INFO - Logging initialized. Log file: logs/simulation_detailed_20250925_170334.log
+2025-09-25 17:03:34,607 - MPMSimulation - INFO - === SIMULATION INITIALIZATION ===
+2025-09-25 17:03:34,608 - MPMSimulation - INFO - Config loaded from: physics_config.yaml
+2025-09-25 17:03:34,608 - MPMSimulation - INFO - Initializing Taichi...
+2025-09-25 17:03:34,608 - MPMSimulation - INFO - Taichi version: (1, 7, 4)

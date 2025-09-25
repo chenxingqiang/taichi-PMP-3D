@@ -1,0 +1,53 @@
+2025-09-25 17:10:04,274 - MPMSimulation - INFO - Logging initialized. Log file: logs/simulation_detailed_20250925_171004.log
+2025-09-25 17:10:04,278 - MPMSimulation - INFO - === SIMULATION INITIALIZATION ===
+2025-09-25 17:10:04,278 - MPMSimulation - INFO - Config loaded from: physics_config.yaml
+2025-09-25 17:10:04,278 - MPMSimulation - INFO - Initializing Taichi...
+2025-09-25 17:10:04,278 - MPMSimulation - INFO - Taichi version: (1, 7, 4)
+2025-09-25 17:10:04,337 - MPMSimulation - INFO - Taichi initialized with CPU backend for debugging
+2025-09-25 17:10:04,337 - MPMSimulation - INFO - Domain: 10.0 x 1.0 x 1.0 m
+2025-09-25 17:10:04,337 - MPMSimulation - INFO - Time step: 1e-05 s, Total time: 2.0 s
+2025-09-25 17:10:04,337 - MPMSimulation - INFO - Grid: 1667 x 167 x 167 cells
+2025-09-25 17:10:04,337 - MPMSimulation - INFO - Mesh size: 0.006 m
+2025-09-25 17:10:04,337 - MPMSimulation - INFO - Mesh-barrier ratio: 0.04
+2025-09-25 17:10:04,337 - MPMSimulation - INFO - Initializing simulation components...
+2025-09-25 17:10:04,337 - MPMSimulation - INFO - Initializing MPM solver...
+2025-09-25 17:10:05,644 - MPMSimulation - INFO - MPM solver initialized
+2025-09-25 17:10:05,644 - MPMSimulation - INFO - Initializing barrier model...
+2025-09-25 17:10:05,673 - MPMSimulation - INFO - Barrier model initialized
+2025-09-25 17:10:05,673 - MPMSimulation - INFO - Initializing metrics calculator...
+2025-09-25 17:10:05,680 - MPMSimulation - INFO - Metrics calculator initialized
+2025-09-25 17:10:05,680 - MPMSimulation - INFO - Initializing particles...
+2025-09-25 17:10:05,680 - MPMSimulation - INFO - Debris geometry: length=500.000 m, height=0.800 m
+2025-09-25 17:10:05,856 - MPMSimulation - INFO - Initialized 1000000 particles
+2025-09-25 17:10:05,856 - MPMSimulation - INFO - Particles per cell: 16
+2025-09-25 17:10:05,924 - MPMSimulation - INFO - === SIMULATION INITIALIZATION COMPLETE ===
+2025-09-25 17:10:05,924 - MPMSimulation - INFO - === STARTING SIMULATION ===
+2025-09-25 17:10:05,924 - MPMSimulation - INFO - Step 0, Time: 0.000000 s
+2025-09-25 17:11:52,011 - MPMSimulation - DEBUG - Step 0 statistics:
+2025-09-25 17:11:52,012 - MPMSimulation - DEBUG -   Velocity: max=0.000007, mean=0.000000
+2025-09-25 17:11:52,012 - MPMSimulation - DEBUG -   Pressure: max=0.000000, min=0.000000, mean=0.000000
+2025-09-25 17:11:52,012 - MPMSimulation - DEBUG -   NaN/Inf check: vel_nan=False, vel_inf=False, p_nan=False, p_inf=False
+2025-09-25 17:11:52,013 - MPMSimulation - WARNING - Slow step 1: 106.089 s
+2025-09-25 17:13:29,370 - MPMSimulation - WARNING - Slow step 2: 97.357 s
+2025-09-25 17:15:21,782 - MPMSimulation - WARNING - Slow step 3: 112.412 s
+2025-09-25 17:17:21,191 - MPMSimulation - WARNING - Slow step 4: 119.408 s
+2025-09-25 17:19:15,397 - MPMSimulation - WARNING - Slow step 5: 114.205 s
+2025-09-25 17:21:06,148 - MPMSimulation - WARNING - Slow step 6: 110.751 s
+2025-09-25 17:22:58,926 - MPMSimulation - WARNING - Slow step 7: 112.778 s
+2025-09-25 17:24:50,629 - MPMSimulation - WARNING - Slow step 8: 111.703 s
+2025-09-25 17:26:43,088 - MPMSimulation - WARNING - Slow step 9: 112.456 s
+2025-09-25 17:28:37,362 - MPMSimulation - WARNING - Slow step 10: 114.274 s
+2025-09-25 17:30:29,330 - MPMSimulation - WARNING - Slow step 11: 111.967 s
+2025-09-25 17:32:26,788 - MPMSimulation - WARNING - Slow step 12: 117.457 s
+2025-09-25 17:34:21,365 - MPMSimulation - WARNING - Slow step 13: 114.576 s
+2025-09-25 17:36:21,294 - MPMSimulation - WARNING - Slow step 14: 119.928 s
+2025-09-25 17:38:24,332 - MPMSimulation - WARNING - Slow step 15: 123.037 s
+2025-09-25 17:40:19,984 - MPMSimulation - WARNING - Slow step 16: 115.652 s
+2025-09-25 17:42:15,204 - MPMSimulation - WARNING - Slow step 17: 115.219 s
+2025-09-25 17:44:08,550 - MPMSimulation - WARNING - Slow step 18: 113.345 s
+2025-09-25 17:46:03,706 - MPMSimulation - WARNING - Slow step 19: 115.156 s
+2025-09-25 17:48:07,460 - MPMSimulation - WARNING - Slow step 20: 123.752 s
+2025-09-25 17:50:08,981 - MPMSimulation - WARNING - Slow step 21: 121.521 s
+2025-09-25 17:52:10,267 - MPMSimulation - WARNING - Slow step 22: 121.286 s
+2025-09-25 17:54:09,436 - MPMSimulation - WARNING - Slow step 23: 119.168 s
+2025-09-25 17:56:06,317 - MPMSimulation - WARNING - Slow step 24: 116.880 s

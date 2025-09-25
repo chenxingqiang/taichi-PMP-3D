@@ -1,197 +1,133 @@
-# Two-Phase MPM Physics Configuration
-# Based on: Ng et al. (2023) "Two-phase MPM modelling of debris flow impact against dual rigid barriers"
-
-metadata:
-  paper_doi: "https://doi.org/10.1680/jgeot.22.00199"
-  validation_cases: ["sand_water_mixture", "dry_sand", "water_only"]
-  reference_table: "Table 1, Page 4"
-
-# Material Properties from Table 1
-solid_phase:
-  density: 2650.0                    # kg/m³, sand density
-  youngs_modulus: 10.0e6             # Pa, Young's modulus  
-  poissons_ratio: 0.3                # -, Poisson's ratio
-  
-  # Friction parameters
-  static_friction: 0.49              # -, μ₁ (internal friction ≈ 26°)
-  limiting_friction: 1.4             # -, μ₂ in μ(I) rheology
-  particle_diameter: 1.0e-3          # m, solid particle diameter
-  
-  # μ(I) rheology parameters  
-  rheology_param_a: 1.23             # -, a parameter
-  rheology_param_b: 0.31             # -, b parameter
-  critical_solid_fraction: 0.56      # -, φₘ critical solid volume fraction
-  
-  # Dilatancy parameter
-  dilatancy_param_k4: 4.7            # -, K₄ for state-dependent dilation
-
-fluid_phase:
-  density: 1000.0                    # kg/m³, water density
-  viscosity: 1.0e-3                  # Pa·s, dynamic viscosity
-
+barrier_spacings:
+- 1.5
+- 2.0
+- 2.5
+- 3.0
+- 3.5
+- 4.0
+- 4.5
+- 5.0
 boundary_conditions:
-  basal_friction: 0.4                # -, μbed bed friction coefficient
-  barrier_friction: 0.4              # -, contact friction with barriers
-
-# Simulation Domain Configuration
+  barrier_friction: 0.4
+  basal_friction: 0.4
 domain:
-  debris_volume: 500.0               # m³, total debris flow volume
-  channel_width: 10.0                # m, channel width (volume/width = cross-section)
-  slope_angle: 20.0                  # degrees, channel inclination
-  aspect_ratio: 8.0                  # -, initial debris length/height ratio
-  barrier_height_factor: 2.0         # -, HB = 2*hflow
-
-# Simulation Parameters
-simulation:
-  total_time: 5.0                    # s, total simulation time
-  gravity: 9.81                      # m/s², gravitational acceleration
-  slope_angle: 20.0                  # degrees, channel inclination
-  barrier_height: 0.15               # m, barrier height
-  barrier_spacing: 2.0               # m, distance between barriers
-  barrier_positions: [3.0, 5.0]      # m, x-positions of barriers
-  debris_volume: 500.0               # m³, initial debris volume
-  domain_length: 10.0                # m, simulation domain length
-  domain_width: 1.0                  # m, simulation domain width
-  domain_height: 1.0                 # m, simulation domain height
-
-# Froude Number Test Cases
-froude_numbers: [2.0, 4.0, 6.0]     # -, dimensionless flow regimes
-
-# Barrier Spacing Study (normalized by landing distance xi)
-barrier_spacings: [1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
-
-# Numerical Parameters
-numerics:
-  # Mesh resolution  
-  particles_per_cell: 16             # material points per background cell
-  mesh_barrier_ratio: 0.04           # mesh_size / barrier_height
-  
-  # Time integration
-  cfl_factor: 0.1                    # 减小CFL因子提高稳定性
-  max_timestep: 1.0e-5               # s, 减小时间步长提高稳定性
-  
-  # Solver tolerances
-  pressure_tolerance: 1.0e-4         # 放宽压力求解器容差
-  contact_tolerance: 1.0e-8          # barrier contact detection
-  contact_stiffness: 100000000.0     # N/m, barrier contact stiffness
-  contact_damping: 1000.0            # N·s/m, barrier contact damping
-  
-  # Output control
-  vtk_output_interval: 100           # timesteps between VTK exports
-  statistics_interval: 10            # timesteps between statistics
-
-# Governing Equations Reference
+  aspect_ratio: 8.0
+  barrier_height_factor: 2.0
+  channel_width: 10.0
+  debris_volume: 500.0
+  slope_angle: 20.0
 equations:
-  solid_momentum: |
-    ρ̄ₛ(Dvₛ/Dt) = ρ̄ₛg + ∇·σ' - f_d - φ∇pf     [Eq. 5]
-    where:
-      ρ̄ₛ = φρₛ (effective solid density)
-      σ' = effective stress tensor of solid phase
-      f_d = inter-phase drag force
-      φ = solid volume fraction
-      pf = pore fluid pressure
-  
-  fluid_momentum: |
-    ρ̄f(Dvf/Dt) = ρ̄fg + ∇·Tf + f_d - (1-φ)∇pf  [Eq. 6] 
-    where:
-      ρ̄f = (1-φ)ρf (effective fluid density)  
-      Tf = deviatoric stress tensor of fluid phase
-  
-  incompressibility: |
-    ∇·vf = 0                                     [Eq. 9]
-  
-  fluid_stress: |
-    Tf = ηf[1 + 5φ/2][∇vf + (∇vf)ᵀ]             [Eq. 10]
-  
-  drag_force: |
-    f_d = 18φ(1-φ)ηf/d² F̂(vₛ - vf)              [Eq. 22]
-    where F̂ depends on solid fraction and grain Reynolds number
-  
-  yield_surface_shear: |
-    fshear = √J₂ - μₚp'                          [Eq. 17]
-    where:
-      J₂ = second invariant of deviatoric stress
-      μₚ = total friction coefficient
-      p' = mean effective stress
-  
-  friction_coefficient: |
-    μₚ = μ₁ + (μ₂-μ₁)/(1+b/Im) + 5φIᵥ/(2aIm)    [Eq. 18]
-    where:
-      Im = √(I² + 2Iv) (mixed inertial number)
-      I = γ̇ₚd√(ρₛ/p') (inertial number)  
-      Iv = ηfγ̇ₚ/p' (viscous number)
-      γ̇ₚ = equivalent plastic shear strain rate
-  
-  yield_surface_compaction: |
-    fcompaction = g(φ)p' - aφ²[(γ̇ₚ)²d²ρₛ + 2ηfγ̇ₚ] [Eq. 15]
-    where:
-      g(φ) = (φₘ-φ)² if φ < φₘ, else 0
-  
-  equilibrium_solid_fraction: |
-    φeq = φₘ/(1 + aIm)                           [Eq. 11]
-  
-  dilation_angle: |
-    β = K₄(φ - φeq)                             [Eq. 21]
-
-# Impact Force Calculation (Design Equations)
-impact_force:
-  hydrodynamic_static: |
-    F = αρv²h + (k/2)h²ρ||g||                   [Eq. 1]
-    where:
-      α = dynamic impact coefficient (= 1.0)
-      k = static impact coefficient (= 1.0) 
-      ρ = debris flow density
-      v = flow velocity at barrier
-      h = flow depth at barrier
-  
-  point_mass_trajectory: |
-    xi = (v²launch)/(||g||cosθ) * [tanθ + √(tan²θ + 2||g||HB/(v²launch*cosθ))] + HB*tanθ  [Eq. 3]
-    where:
-      xi = landing distance
-      vlaunch = launch velocity at barrier crest
-      HB = barrier height
-      θ = slope inclination
-  
-  landing_velocity: |
-    vi = R*vr*cosθland                          [Eq. 4]
-    where:
-      R = velocity correction factor (≈ 1.0)
-      vr = velocity just before landing
-      θland = angle between vr and bed
-
-# Fluidization Ratio Analysis  
+  dilation_angle: "\u03B2 = K\u2084(\u03C6 - \u03C6eq)                           \
+    \  [Eq. 21]\n"
+  drag_force: "f_d = 18\u03C6(1-\u03C6)\u03B7f/d\xB2 F\u0302(v\u209B - vf)       \
+    \       [Eq. 22]\nwhere F\u0302 depends on solid fraction and grain Reynolds number\n"
+  equilibrium_solid_fraction: "\u03C6eq = \u03C6\u2098/(1 + aIm)                 \
+    \          [Eq. 11]\n"
+  fluid_momentum: "\u03C1\u0304f(Dvf/Dt) = \u03C1\u0304fg + \u2207\xB7Tf + f_d - (1-\u03C6\
+    )\u2207pf  [Eq. 6] \nwhere:\n  \u03C1\u0304f = (1-\u03C6)\u03C1f (effective fluid\
+    \ density)  \n  Tf = deviatoric stress tensor of fluid phase\n"
+  fluid_stress: "Tf = \u03B7f[1 + 5\u03C6/2][\u2207vf + (\u2207vf)\u1D40]        \
+    \     [Eq. 10]\n"
+  friction_coefficient: "\u03BC\u209A = \u03BC\u2081 + (\u03BC\u2082-\u03BC\u2081\
+    )/(1+b/Im) + 5\u03C6I\u1D65/(2aIm)    [Eq. 18]\nwhere:\n  Im = \u221A(I\xB2 +\
+    \ 2Iv) (mixed inertial number)\n  I = \u03B3\u0307\u209Ad\u221A(\u03C1\u209B/p')\
+    \ (inertial number)  \n  Iv = \u03B7f\u03B3\u0307\u209A/p' (viscous number)\n\
+    \  \u03B3\u0307\u209A = equivalent plastic shear strain rate\n"
+  incompressibility: "\u2207\xB7vf = 0                                     [Eq. 9]\n"
+  solid_momentum: "\u03C1\u0304\u209B(Dv\u209B/Dt) = \u03C1\u0304\u209Bg + \u2207\xB7\
+    \u03C3' - f_d - \u03C6\u2207pf     [Eq. 5]\nwhere:\n  \u03C1\u0304\u209B = \u03C6\
+    \u03C1\u209B (effective solid density)\n  \u03C3' = effective stress tensor of\
+    \ solid phase\n  f_d = inter-phase drag force\n  \u03C6 = solid volume fraction\n\
+    \  pf = pore fluid pressure\n"
+  yield_surface_compaction: "fcompaction = g(\u03C6)p' - a\u03C6\xB2[(\u03B3\u0307\
+    \u209A)\xB2d\xB2\u03C1\u209B + 2\u03B7f\u03B3\u0307\u209A] [Eq. 15]\nwhere:\n\
+    \  g(\u03C6) = (\u03C6\u2098-\u03C6)\xB2 if \u03C6 < \u03C6\u2098, else 0\n"
+  yield_surface_shear: "fshear = \u221AJ\u2082 - \u03BC\u209Ap'                  \
+    \        [Eq. 17]\nwhere:\n  J\u2082 = second invariant of deviatoric stress\n\
+    \  \u03BC\u209A = total friction coefficient\n  p' = mean effective stress\n"
+fluid_phase:
+  density: 1000.0
+  viscosity: 0.001
 fluidization:
-  definition: |
-    λ = pbed/(pbed + σ'bed)                     [Eq. 26]
-    where:
-      λ = basal fluidization ratio
-      pbed = basal pore fluid pressure  
-      σ'bed = effective stress normal to bed
-  
-  friction_reduction: |
-    Ffric = μbed*σ'bed = μbed*σbed*(1-λ)        [Eq. 25]
-    Effect: Higher λ → Lower bed friction → Higher flow velocity
-
-# Experimental Validation Targets
-validation_data:
-  impact_force_peak:
-    dry_sand: 50.0                   # N, maximum impact force
-    water: 140.0                     # N, peak dynamic load  
-    sand_water: 140.0                # N, peak for mixture (φ = 0.36)
-    
-  flow_kinematics:
-    front_velocity: 2.5              # m/s, measured before impact
-    launch_angle: 64.0               # degrees, initial jet trajectory
-    stable_angle: 53.0               # degrees, stable overflow angle
-    
-  landing_characteristics:
-    max_distance_fr2: 12.0           # normalized by hflow for Fr=2
-    max_distance_fr6: 24.0           # normalized by hflow for Fr=6
-    velocity_increase: 0.8           # up to 80% velocity increase after landing
-
-# Performance Benchmarks
+  definition: "\u03BB = pbed/(pbed + \u03C3'bed)                     [Eq. 26]\nwhere:\n\
+    \  \u03BB = basal fluidization ratio\n  pbed = basal pore fluid pressure  \n \
+    \ \u03C3'bed = effective stress normal to bed\n"
+  friction_reduction: "Ffric = \u03BCbed*\u03C3'bed = \u03BCbed*\u03C3bed*(1-\u03BB\
+    )        [Eq. 25]\nEffect: Higher \u03BB \u2192 Lower bed friction \u2192 Higher\
+    \ flow velocity\n"
+froude_numbers:
+- 2.0
+- 4.0
+- 6.0
+impact_force:
+  hydrodynamic_static: "F = \u03B1\u03C1v\xB2h + (k/2)h\xB2\u03C1||g||           \
+    \        [Eq. 1]\nwhere:\n  \u03B1 = dynamic impact coefficient (= 1.0)\n  k =\
+    \ static impact coefficient (= 1.0) \n  \u03C1 = debris flow density\n  v = flow\
+    \ velocity at barrier\n  h = flow depth at barrier\n"
+  landing_velocity: "vi = R*vr*cos\u03B8land                          [Eq. 4]\nwhere:\n\
+    \  R = velocity correction factor (\u2248 1.0)\n  vr = velocity just before landing\n\
+    \  \u03B8land = angle between vr and bed\n"
+  point_mass_trajectory: "xi = (v\xB2launch)/(||g||cos\u03B8) * [tan\u03B8 + \u221A\
+    (tan\xB2\u03B8 + 2||g||HB/(v\xB2launch*cos\u03B8))] + HB*tan\u03B8  [Eq. 3]\n\
+    where:\n  xi = landing distance\n  vlaunch = launch velocity at barrier crest\n\
+    \  HB = barrier height\n  \u03B8 = slope inclination\n"
+metadata:
+  paper_doi: https://doi.org/10.1680/jgeot.22.00199
+  reference_table: Table 1, Page 4
+  validation_cases:
+  - sand_water_mixture
+  - dry_sand
+  - water_only
+numerics:
+  cfl_factor: 0.1
+  contact_damping: 1000.0
+  contact_stiffness: 100000000.0
+  contact_tolerance: 1.0e-08
+  max_timestep: 1.0e-05
+  mesh_barrier_ratio: 0.04
+  particles_per_cell: 16
+  pressure_tolerance: 0.0001
+  statistics_interval: 0.05
+  vtk_output_interval: 0.2
 performance_targets:
-  memory_usage: 8.0                  # GB, maximum GPU memory for 500m³ simulation
-  throughput: 500.0                  # MLUPS, million lattice updates per second
-  convergence_rate: 1.0e-6           # pressure solver residual tolerance
-  stability_cfl: 0.5                 # maximum stable CFL number
+  convergence_rate: 1.0e-06
+  memory_usage: 8.0
+  stability_cfl: 0.5
+  throughput: 500.0
+simulation:
+  barrier_height: 0.15
+  barrier_positions:
+  - 3.0
+  - 5.0
+  barrier_spacing: 2.0
+  debris_volume: 500.0
+  domain_height: 1.0
+  domain_length: 10.0
+  domain_width: 1.0
+  gravity: 9.81
+  slope_angle: 20.0
+  total_time: 2.0
+solid_phase:
+  critical_solid_fraction: 0.56
+  density: 2650.0
+  dilatancy_param_k4: 4.7
+  limiting_friction: 1.4
+  particle_diameter: 0.001
+  poissons_ratio: 0.3
+  rheology_param_a: 1.23
+  rheology_param_b: 0.31
+  static_friction: 0.49
+  youngs_modulus: 10.0e6
+validation_data:
+  flow_kinematics:
+    front_velocity: 2.5
+    launch_angle: 64.0
+    stable_angle: 53.0
+  impact_force_peak:
+    dry_sand: 50.0
+    sand_water: 140.0
+    water: 140.0
+  landing_characteristics:
+    max_distance_fr2: 12.0
+    max_distance_fr6: 24.0
+    velocity_increase: 0.8

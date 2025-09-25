@@ -207,51 +207,51 @@ class CompleteDebrisFlowSimulation:
         """Compute all output metrics for current timestep."""
         # Get particle data
         positions, velocities = self.solver.export_particles_to_numpy()
-        
+
         if len(positions) > 0:
             # Compute flow statistics
             velocity_magnitudes = np.linalg.norm(velocities, axis=1)
             flow_depth = np.max(positions[:, 2]) - np.min(positions[:, 2])
-            
+
             # For now, skip the Taichi kernel computations that require field inputs
             # and use simplified calculations instead
-            
+
             # Simplified fluidization ratio calculation (without Taichi kernel)
             pressure_values = np.random.random(len(positions)) * 1000  # Placeholder
             stress_values = np.random.random(len(positions)) * 5000   # Placeholder
-            
+
             # Calculate fluidization ratio directly
             fluidization_ratios = pressure_values / (pressure_values + stress_values)
             fluidization_ratios = np.clip(fluidization_ratios, 0.0, 1.0)  # Clamp to [0,1]
-            
+
             # Store simplified results
             self.metrics_calculator.mean_fluidization_ratio[None] = np.mean(fluidization_ratios)
             self.metrics_calculator.max_fluidization_ratio[None] = np.max(fluidization_ratios)
-            
+
             # Simplified impact force calculation
             flow_density = self.config['solid_phase']['density']
             alpha = 1.0  # Dynamic impact coefficient
             k = 1.0      # Static impact coefficient
-            
+
             # Hydrodynamic component: αρv²h
             hydrodynamic = alpha * flow_density * np.mean(velocity_magnitudes**2) * flow_depth
             # Static component: (k/2)h²ρ||g||
             static = (k / 2.0) * flow_depth**2 * flow_density * self.config['simulation']['gravity']
-            
+
             self.metrics_calculator.hydrodynamic_force[None] = hydrodynamic
             self.metrics_calculator.static_force[None] = static
             self.metrics_calculator.total_impact_force[None] = hydrodynamic + static
-            
+
             # Simplified flow statistics
             self.metrics_calculator.mean_flow_velocity[None] = np.mean(velocity_magnitudes)
             self.metrics_calculator.max_flow_velocity[None] = np.max(velocity_magnitudes)
             self.metrics_calculator.flow_depth[None] = flow_depth
             self.metrics_calculator.solid_volume_fraction[None] = 0.6  # Placeholder
-            
+
             # Compute barrier effectiveness
             self.metrics_calculator.compute_barrier_effectiveness(
-                self.total_particles, self.captured_particles, 
-                self.overflow_particles, self.initial_kinetic_energy, 
+                self.total_particles, self.captured_particles,
+                self.overflow_particles, self.initial_kinetic_energy,
                 self.solver.total_kinetic_energy[None]
             )
 

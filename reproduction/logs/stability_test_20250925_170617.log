@@ -1,0 +1,56 @@
+2025-09-25 17:06:17,347 - INFO - === QUICK STABILITY TEST WITH PAPER PARAMETERS ===
+2025-09-25 17:06:17,351 - INFO - Configuration loaded
+2025-09-25 17:06:17,410 - INFO - Taichi initialized with CPU backend
+2025-09-25 17:06:17,410 - INFO - Domain: 10.0 x 1.0 x 1.0 m
+2025-09-25 17:06:17,410 - INFO - Grid: 1667 x 167 x 167 cells
+2025-09-25 17:06:17,410 - INFO - Mesh size: 0.006 m
+2025-09-25 17:06:17,410 - INFO - Particles per cell: 16
+2025-09-25 17:06:17,410 - INFO - Time step: 1e-06 s
+2025-09-25 17:06:17,410 - INFO - Total cells: 46,490,963
+2025-09-25 17:06:17,410 - INFO - Estimated particles: 743,855,408
+2025-09-25 17:06:17,410 - WARNING - Grid is very large: 46,490,963 cells
+2025-09-25 17:06:17,410 - WARNING - This may cause memory issues or slow performance
+2025-09-25 17:06:17,410 - WARNING - Estimated particles is very large: 743,855,408
+2025-09-25 17:06:17,410 - WARNING - This may cause memory issues
+2025-09-25 17:06:17,410 - INFO - Testing with reduced domain for stability...
+2025-09-25 17:06:17,410 - INFO - Test domain: 2.0 x 0.5 x 0.5 m
+2025-09-25 17:06:17,410 - INFO - Test grid: 334 x 84 x 84 cells
+2025-09-25 17:06:17,410 - INFO - Test total cells: 2,356,704
+2025-09-25 17:06:17,410 - INFO - Test estimated particles: 37,707,264
+2025-09-25 17:06:17,410 - INFO - Initializing MPM solver...
+2025-09-25 17:06:17,488 - INFO - MPM solver initialized successfully
+2025-09-25 17:06:17,488 - INFO - Initializing particles...
+2025-09-25 17:06:17,539 - INFO - Initialized 1000000 particles
+2025-09-25 17:06:17,539 - INFO - Running stability test...
+2025-09-25 17:06:18,703 - INFO - Step 0: max_vel = 0.000010 m/s
+2025-09-25 17:06:36,132 - INFO - Step 100: max_vel = 0.000975 m/s
+2025-09-25 17:06:54,364 - INFO - Step 200: max_vel = 0.001924 m/s
+2025-09-25 17:07:13,480 - INFO - Step 300: max_vel = 0.002865 m/s
+2025-09-25 17:07:32,806 - INFO - Step 400: max_vel = 0.003796 m/s
+2025-09-25 17:07:52,483 - INFO - Step 500: max_vel = 0.004719 m/s
+2025-09-25 17:08:12,313 - INFO - Step 600: max_vel = 0.005633 m/s
+2025-09-25 17:08:32,205 - INFO - Step 700: max_vel = 0.006538 m/s
+2025-09-25 17:08:52,199 - INFO - Step 800: max_vel = 0.007435 m/s
+2025-09-25 17:09:12,251 - INFO - Step 900: max_vel = 0.008323 m/s
+2025-09-25 17:09:32,027 - INFO - === STABILITY TEST RESULTS ===
+2025-09-25 17:09:32,027 - INFO - ✅ STABILITY TEST PASSED
+2025-09-25 17:09:32,027 - INFO - Completed 1000 steps without numerical issues
+2025-09-25 17:09:32,028 - INFO - === PARAMETER SENSITIVITY TEST ===
+2025-09-25 17:09:32,028 - INFO - Testing dt=1e-06, CFL=0.001
+2025-09-25 17:09:32,028 - INFO -   dt=1e-06, CFL=0.001 - would need full test
+2025-09-25 17:09:32,028 - INFO - Testing dt=1e-06, CFL=0.01
+2025-09-25 17:09:32,028 - INFO -   dt=1e-06, CFL=0.01 - would need full test
+2025-09-25 17:09:32,028 - INFO - Testing dt=1e-06, CFL=0.1
+2025-09-25 17:09:32,028 - INFO -   dt=1e-06, CFL=0.1 - would need full test
+2025-09-25 17:09:32,028 - INFO - Testing dt=1e-05, CFL=0.001
+2025-09-25 17:09:32,028 - INFO -   dt=1e-05, CFL=0.001 - would need full test
+2025-09-25 17:09:32,028 - INFO - Testing dt=1e-05, CFL=0.01
+2025-09-25 17:09:32,028 - INFO -   dt=1e-05, CFL=0.01 - would need full test
+2025-09-25 17:09:32,028 - INFO - Testing dt=1e-05, CFL=0.1
+2025-09-25 17:09:32,028 - INFO -   dt=1e-05, CFL=0.1 - would need full test
+2025-09-25 17:09:32,028 - INFO - Testing dt=0.0001, CFL=0.001
+2025-09-25 17:09:32,028 - INFO -   dt=0.0001, CFL=0.001 - would need full test
+2025-09-25 17:09:32,028 - INFO - Testing dt=0.0001, CFL=0.01
+2025-09-25 17:09:32,028 - INFO -   dt=0.0001, CFL=0.01 - would need full test
+2025-09-25 17:09:32,028 - INFO - Testing dt=0.0001, CFL=0.1
+2025-09-25 17:09:32,028 - INFO -   dt=0.0001, CFL=0.1 - would need full test

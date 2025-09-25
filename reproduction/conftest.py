@@ -42,7 +42,7 @@ def pytest_configure(config):
     if TAICHI_AVAILABLE:
         backend = config.getoption("--backend")
         debug = config.getoption("--debug-mode")
-        
+
         # Map backend strings to Taichi architectures
         backend_map = {
             "cpu": ti.cpu,
@@ -50,7 +50,7 @@ def pytest_configure(config):
             "vulkan": ti.vulkan,
             "opengl": ti.opengl
         }
-        
+
         if backend in backend_map:
             try:
                 ti.init(arch=backend_map[backend], debug=debug)
@@ -110,7 +110,7 @@ def pytest_runtest_setup(item):
     """Skip tests based on available backends and dependencies."""
     if item.get_closest_marker("gpu") and not TAICHI_AVAILABLE:
         pytest.skip("GPU tests require Taichi")
-    
+
     if item.get_closest_marker("slow") and not item.config.getoption("--runslow", default=False):
         pytest.skip("Slow tests skipped (use --runslow to run)")
 

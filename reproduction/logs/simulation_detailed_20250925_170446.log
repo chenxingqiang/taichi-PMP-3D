@@ -1,0 +1,30 @@
+2025-09-25 17:04:46,488 - MPMSimulation - INFO - Logging initialized. Log file: logs/simulation_detailed_20250925_170446.log
+2025-09-25 17:04:46,492 - MPMSimulation - INFO - === SIMULATION INITIALIZATION ===
+2025-09-25 17:04:46,492 - MPMSimulation - INFO - Config loaded from: physics_config.yaml
+2025-09-25 17:04:46,492 - MPMSimulation - INFO - Initializing Taichi...
+2025-09-25 17:04:46,492 - MPMSimulation - INFO - Taichi version: (1, 7, 4)
+2025-09-25 17:04:46,552 - MPMSimulation - INFO - Taichi initialized with CPU backend for debugging
+2025-09-25 17:04:46,552 - MPMSimulation - INFO - Domain: 10.0 x 1.0 x 1.0 m
+2025-09-25 17:04:46,552 - MPMSimulation - INFO - Time step: 1e-05 s, Total time: 2.0 s
+2025-09-25 17:04:46,552 - MPMSimulation - INFO - Grid: 1667 x 167 x 167 cells
+2025-09-25 17:04:46,552 - MPMSimulation - INFO - Mesh size: 0.006 m
+2025-09-25 17:04:46,552 - MPMSimulation - INFO - Mesh-barrier ratio: 0.04
+2025-09-25 17:04:46,552 - MPMSimulation - INFO - Initializing simulation components...
+2025-09-25 17:04:46,552 - MPMSimulation - INFO - Initializing MPM solver...
+2025-09-25 17:04:47,831 - MPMSimulation - INFO - MPM solver initialized
+2025-09-25 17:04:47,832 - MPMSimulation - INFO - Initializing barrier model...
+2025-09-25 17:04:47,992 - MPMSimulation - INFO - Barrier model initialized
+2025-09-25 17:04:47,992 - MPMSimulation - INFO - Initializing metrics calculator...
+2025-09-25 17:04:48,000 - MPMSimulation - INFO - Metrics calculator initialized
+2025-09-25 17:04:48,000 - MPMSimulation - INFO - Initializing particles...
+2025-09-25 17:04:48,000 - MPMSimulation - INFO - Debris geometry: length=500.000 m, height=0.800 m
+2025-09-25 17:04:48,243 - MPMSimulation - INFO - Initialized 1000000 particles
+2025-09-25 17:04:48,243 - MPMSimulation - INFO - Particles per cell: 16
+2025-09-25 17:04:48,322 - MPMSimulation - INFO - === SIMULATION INITIALIZATION COMPLETE ===
+2025-09-25 17:04:48,322 - MPMSimulation - INFO - === STARTING SIMULATION ===
+2025-09-25 17:04:48,322 - MPMSimulation - INFO - Step 0, Time: 0.000000 s
+2025-09-25 17:04:48,364 - MPMSimulation - ERROR - Error in step 0: 'IncompressibleMPMSolver' object has no attribute 'p'
+2025-09-25 17:04:48,364 - MPMSimulation - ERROR - Step 0 failed!
+2025-09-25 17:04:48,364 - MPMSimulation - INFO - === SIMULATION COMPLETED ===
+2025-09-25 17:04:48,364 - MPMSimulation - INFO - Total simulation time: 0.04 s
+2025-09-25 17:04:48,364 - MPMSimulation - INFO - Total steps: 0

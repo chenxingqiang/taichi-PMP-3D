@@ -1,0 +1,47 @@
+2025-09-25 17:05:46,782 - INFO - === QUICK STABILITY TEST WITH PAPER PARAMETERS ===
+2025-09-25 17:05:46,786 - INFO - Configuration loaded
+2025-09-25 17:05:46,845 - INFO - Taichi initialized with CPU backend
+2025-09-25 17:05:46,845 - INFO - Domain: 10.0 x 1.0 x 1.0 m
+2025-09-25 17:05:46,845 - INFO - Grid: 1667 x 167 x 167 cells
+2025-09-25 17:05:46,845 - INFO - Mesh size: 0.006 m
+2025-09-25 17:05:46,845 - INFO - Particles per cell: 16
+2025-09-25 17:05:46,845 - INFO - Time step: 1e-06 s
+2025-09-25 17:05:46,845 - INFO - Total cells: 46,490,963
+2025-09-25 17:05:46,845 - INFO - Estimated particles: 743,855,408
+2025-09-25 17:05:46,845 - WARNING - Grid is very large: 46,490,963 cells
+2025-09-25 17:05:46,845 - WARNING - This may cause memory issues or slow performance
+2025-09-25 17:05:46,845 - WARNING - Estimated particles is very large: 743,855,408
+2025-09-25 17:05:46,845 - WARNING - This may cause memory issues
+2025-09-25 17:05:46,845 - INFO - Testing with reduced domain for stability...
+2025-09-25 17:05:46,845 - INFO - Test domain: 2.0 x 0.5 x 0.5 m
+2025-09-25 17:05:46,845 - INFO - Test grid: 334 x 84 x 84 cells
+2025-09-25 17:05:46,845 - INFO - Test total cells: 2,356,704
+2025-09-25 17:05:46,845 - INFO - Test estimated particles: 37,707,264
+2025-09-25 17:05:46,845 - INFO - Initializing MPM solver...
+2025-09-25 17:05:46,940 - INFO - MPM solver initialized successfully
+2025-09-25 17:05:46,940 - INFO - Initializing particles...
+2025-09-25 17:05:47,057 - INFO - Initialized 1000000 particles
+2025-09-25 17:05:47,057 - INFO - Running stability test...
+2025-09-25 17:05:57,906 - ERROR - Error at step 0: 'IncompressibleMPMSolver' object has no attribute 'p'
+2025-09-25 17:05:57,906 - INFO - === STABILITY TEST RESULTS ===
+2025-09-25 17:05:57,906 - ERROR - ❌ STABILITY TEST FAILED
+2025-09-25 17:05:57,906 - ERROR - Issue at step 0: {'step': 0, 'error': "'IncompressibleMPMSolver' object has no attribute 'p'"}
+2025-09-25 17:05:57,907 - INFO - === PARAMETER SENSITIVITY TEST ===
+2025-09-25 17:05:57,907 - INFO - Testing dt=1e-06, CFL=0.001
+2025-09-25 17:05:57,907 - INFO -   dt=1e-06, CFL=0.001 - would need full test
+2025-09-25 17:05:57,907 - INFO - Testing dt=1e-06, CFL=0.01
+2025-09-25 17:05:57,907 - INFO -   dt=1e-06, CFL=0.01 - would need full test
+2025-09-25 17:05:57,907 - INFO - Testing dt=1e-06, CFL=0.1
+2025-09-25 17:05:57,907 - INFO -   dt=1e-06, CFL=0.1 - would need full test
+2025-09-25 17:05:57,907 - INFO - Testing dt=1e-05, CFL=0.001
+2025-09-25 17:05:57,907 - INFO -   dt=1e-05, CFL=0.001 - would need full test
+2025-09-25 17:05:57,907 - INFO - Testing dt=1e-05, CFL=0.01
+2025-09-25 17:05:57,907 - INFO -   dt=1e-05, CFL=0.01 - would need full test
+2025-09-25 17:05:57,907 - INFO - Testing dt=1e-05, CFL=0.1
+2025-09-25 17:05:57,907 - INFO -   dt=1e-05, CFL=0.1 - would need full test
+2025-09-25 17:05:57,907 - INFO - Testing dt=0.0001, CFL=0.001
+2025-09-25 17:05:57,907 - INFO -   dt=0.0001, CFL=0.001 - would need full test
+2025-09-25 17:05:57,907 - INFO - Testing dt=0.0001, CFL=0.01
+2025-09-25 17:05:57,907 - INFO -   dt=0.0001, CFL=0.01 - would need full test
+2025-09-25 17:05:57,907 - INFO - Testing dt=0.0001, CFL=0.1
+2025-09-25 17:05:57,907 - INFO -   dt=0.0001, CFL=0.1 - would need full test
