@@ -1,0 +1,56 @@
+# 内存优化版本的两相MPM物理配置
+# 减少网格尺寸以适应GPU内存限制
+
+# 仿真参数
+simulation:
+  total_time: 2.0                    # s, 减少仿真时间
+  gravity: 9.81                      # m/s², 重力加速度
+  slope_angle: 20.0                  # degrees, 渠道倾角
+  barrier_height: 0.15               # m, 屏障高度
+  barrier_spacing: 2.0               # m, 屏障间距
+  barrier_positions: [3.0, 5.0]      # m, 屏障x位置
+  debris_volume: 100.0               # m³, 减少初始泥石流体积
+  domain_length: 6.0                 # m, 减少域长度
+  domain_width: 0.8                  # m, 减少域宽度
+  domain_height: 0.8                 # m, 减少域高度
+
+# 材料属性
+solid_phase:
+  density: 2650.0                    # kg/m³, 固体密度
+  critical_solid_fraction: 0.6       # 临界固体分数
+  static_friction: 0.4               # 静摩擦系数
+  limiting_friction: 0.3             # 极限摩擦系数
+  particle_diameter: 0.002           # m, 颗粒直径
+  cohesion: 0.0                      # Pa, 内聚力
+
+fluid_phase:
+  density: 1000.0                    # kg/m³, 流体密度
+  viscosity: 0.001                   # Pa·s, 动力粘度
+  surface_tension: 0.072             # N/m, 表面张力
+
+# 域设置
+domain:
+  channel_width: 0.8                 # m, 渠道宽度
+  aspect_ratio: 3.0                  # 长宽比
+  mesh_barrier_ratio: 0.08           # 增加网格尺寸比例
+
+# 数值参数
+numerics:
+  max_timestep: 0.0001               # s, 最大时间步长
+  particles_per_cell: 4              # 每网格粒子数
+  statistics_interval: 0.01          # s, 统计输出间隔
+  vtk_output_interval: 0.1           # s, VTK输出间隔
+  contact_stiffness: 100000000.0     # N/m, 屏障接触刚度
+  contact_damping: 1000.0            # N·s/m, 屏障接触阻尼
+  pcg_tolerance: 1e-6                # PCG求解器容差
+  max_pcg_iterations: 100            # 最大PCG迭代次数
+
+# 屏障间距研究参数
+barrier_spacings: [1.5, 2.0, 2.5, 3.0]  # m, 屏障间距研究范围
+
+# 参考方程
+equations:
+  continuity: "∂ρ/∂t + ∇·(ρv) = 0"
+  momentum: "ρ(∂v/∂t + v·∇v) = -∇p + ∇·τ + ρg"
+  level_set: "∂φ/∂t + v·∇φ = 0"
+  reinitialization: "∂φ/∂τ = sign(φ₀)(1 - |∇φ|)"

@@ -516,8 +516,11 @@ class CompleteDebrisFlowSimulation:
 
 def main():
     """Main function to run complete simulation."""
+    # 使用GPU 1 (第二张卡)，设置内存限制
+    ti.init(arch=ti.gpu, device_memory_fraction=0.8, device_memory_GB=20)
     print("Two-Phase MPM Debris Flow Impact Simulation")
     print("Based on Ng et al. (2023)")
+    print("Using GPU 1 for computation")
     print("="*60)
 
     # Create simulation
