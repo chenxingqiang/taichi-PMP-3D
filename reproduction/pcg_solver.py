@@ -297,100 +297,54 @@ class PCGSolver:
                 self.rhs[i, j, k] = 0.0
 
     @ti.func
-    def get_ghost_pressure(self, i, j, k, direction):
-        """Compute ghost pressure using Ghost Fluid Method"""
+    def get_ghost_pressure(self, i, j, k, direction, input_field: ti.template()):
+        """Compute ghost pressure using simplified Ghost Fluid Method
+        
+        For free surface flows, we use p = p_air = 0 at the interface.
+        This provides a simple but effective Dirichlet BC that keeps
+        the linear system well-conditioned for PCG.
+        
+        The matrix remains linear and symmetric positive semi-definite.
+        """
         # direction: 0=+x, 1=-x, 2=+y, 3=-y, 4=+z, 5=-z
         ghost_pressure = 0.0
 
-        # Check if we're at a free surface boundary
-        if direction == 0 and i < self.nx-1:  # +x direction
-            if self.cell_type[i+1, j, k] == 2:  # Air cell
-                phi_fluid = self.level_set[i, j, k]
-                phi_air = self.level_set[i+1, j, k]
-                if abs(phi_fluid - phi_air) > 1e-10:
-                    theta = abs(phi_fluid) / (abs(phi_fluid) + abs(phi_air))
-                    p_fs = self.p_air + self.surface_tension[None] * self.curvature[i, j, k]
-                    ghost_pressure = (p_fs + (theta - 1.0) * self.pressure[i, j, k]) / theta
-                else:
-                    ghost_pressure = self.p_air
-            else:
-                ghost_pressure = self.pressure[i+1, j, k]
-
-        elif direction == 1 and i > 0:  # -x direction
-            if self.cell_type[i-1, j, k] == 2:
-                phi_fluid = self.level_set[i, j, k]
-                phi_air = self.level_set[i-1, j, k]
-                if abs(phi_fluid - phi_air) > 1e-10:
-                    theta = abs(phi_fluid) / (abs(phi_fluid) + abs(phi_air))
-                    p_fs = self.p_air + self.surface_tension[None] * self.curvature[i, j, k]
-                    ghost_pressure = (p_fs + (theta - 1.0) * self.pressure[i, j, k]) / theta
-                else:
-                    ghost_pressure = self.p_air
-            else:
-                ghost_pressure = self.pressure[i-1, j, k]
-
-        elif direction == 2 and j < self.ny-1:  # +y direction
-            if self.cell_type[i, j+1, k] == 2:
-                phi_fluid = self.level_set[i, j, k]
-                phi_air = self.level_set[i, j+1, k]
-                if abs(phi_fluid - phi_air) > 1e-10:
-                    theta = abs(phi_fluid) / (abs(phi_fluid) + abs(phi_air))
-                    p_fs = self.p_air + self.surface_tension[None] * self.curvature[i, j, k]
-                    ghost_pressure = (p_fs + (theta - 1.0) * self.pressure[i, j, k]) / theta
-                else:
-                    ghost_pressure = self.p_air
-            else:
-                ghost_pressure = self.pressure[i, j+1, k]
-
-        elif direction == 3 and j > 0:  # -y direction
-            if self.cell_type[i, j-1, k] == 2:
-                phi_fluid = self.level_set[i, j, k]
-                phi_air = self.level_set[i, j-1, k]
-                if abs(phi_fluid - phi_air) > 1e-10:
-                    theta = abs(phi_fluid) / (abs(phi_fluid) + abs(phi_air))
-                    p_fs = self.p_air + self.surface_tension[None] * self.curvature[i, j, k]
-                    ghost_pressure = (p_fs + (theta - 1.0) * self.pressure[i, j, k]) / theta
-                else:
-                    ghost_pressure = self.p_air
-            else:
-                ghost_pressure = self.pressure[i, j-1, k]
-
-        elif direction == 4 and k < self.nz-1:  # +z direction
-            if self.cell_type[i, j, k+1] == 2:
-                phi_fluid = self.level_set[i, j, k]
-                phi_air = self.level_set[i, j, k+1]
-                if abs(phi_fluid - phi_air) > 1e-10:
-                    theta = abs(phi_fluid) / (abs(phi_fluid) + abs(phi_air))
-                    p_fs = self.p_air + self.surface_tension[None] * self.curvature[i, j, k]
-                    ghost_pressure = (p_fs + (theta - 1.0) * self.pressure[i, j, k]) / theta
-                else:
-                    ghost_pressure = self.p_air
-            else:
-                ghost_pressure = self.pressure[i, j, k+1]
-
-        elif direction == 5 and k > 0:  # -z direction
-            if self.cell_type[i, j, k-1] == 2:
-                phi_fluid = self.level_set[i, j, k]
-                phi_air = self.level_set[i, j, k-1]
-                if abs(phi_fluid - phi_air) > 1e-10:
-                    theta = abs(phi_fluid) / (abs(phi_fluid) + abs(phi_air))
-                    p_fs = self.p_air + self.surface_tension[None] * self.curvature[i, j, k]
-                    ghost_pressure = (p_fs + (theta - 1.0) * self.pressure[i, j, k]) / theta
-                else:
-                    ghost_pressure = self.p_air
-            else:
-                ghost_pressure = self.pressure[i, j, k-1]
+        # Neighbor indices based on direction
+        ni, nj, nk = i, j, k
+        if direction == 0:
+            ni = i + 1
+        elif direction == 1:
+            ni = i - 1
+        elif direction == 2:
+            nj = j + 1
+        elif direction == 3:
+            nj = j - 1
+        elif direction == 4:
+            nk = k + 1
+        elif direction == 5:
+            nk = k - 1
+        
+        # Check bounds
+        if 0 <= ni < self.nx and 0 <= nj < self.ny and 0 <= nk < self.nz:
+            if self.cell_type[ni, nj, nk] == 2:  # Air cell
+                # Simple GFM: use atmospheric pressure (Dirichlet BC)
+                # p_air = 0 (gauge pressure)
+                ghost_pressure = self.p_air
+            elif self.cell_type[ni, nj, nk] == 0:  # Fluid cell
+                ghost_pressure = input_field[ni, nj, nk]
+            # Solid cells: use Neumann BC (∂p/∂n = 0), handled separately
 
         return ghost_pressure
 
     @ti.kernel
     def apply_laplacian(self, input_field: ti.template(), output_field: ti.template()):
-        """Apply negative Laplacian (-∇²) with Ghost Fluid Method
+        """Apply negative Laplacian (-∇²) with simplified Ghost Fluid Method
         
         We compute -∇² instead of ∇² to make the matrix positive semi-definite.
         -∇²p = n_neighbors * p_center - sum(p_neighbors)
         
-        This is consistent with the positive diagonal computed in compute_diagonal().
+        At free surface boundaries (fluid-air), we use p_air = 0 (Dirichlet BC).
+        This keeps the matrix linear and symmetric.
         """
         for i, j, k in output_field:
             if self.cell_type[i, j, k] == 0:  # Fluid cells only
@@ -403,48 +357,48 @@ class PCGSolver:
                     n_neighbors += 1
                     if self.cell_type[i-1, j, k] == 0:  # Fluid
                         neighbors_sum += input_field[i-1, j, k]
-                    else:  # Air - use ghost pressure
-                        neighbors_sum += self.get_ghost_pressure(i, j, k, 1)
+                    else:  # Air - use p_air = 0
+                        neighbors_sum += self.p_air
                 
                 # +x direction
                 if i < self.nx-1 and self.cell_type[i+1, j, k] != 1:  # Not solid
                     n_neighbors += 1
                     if self.cell_type[i+1, j, k] == 0:  # Fluid
                         neighbors_sum += input_field[i+1, j, k]
-                    else:  # Air - use ghost pressure
-                        neighbors_sum += self.get_ghost_pressure(i, j, k, 0)
+                    else:  # Air - use p_air = 0
+                        neighbors_sum += self.p_air
                 
                 # -y direction
                 if j > 0 and self.cell_type[i, j-1, k] != 1:  # Not solid
                     n_neighbors += 1
                     if self.cell_type[i, j-1, k] == 0:  # Fluid
                         neighbors_sum += input_field[i, j-1, k]
-                    else:  # Air - use ghost pressure
-                        neighbors_sum += self.get_ghost_pressure(i, j, k, 3)
+                    else:  # Air - use p_air = 0
+                        neighbors_sum += self.p_air
                 
                 # +y direction
                 if j < self.ny-1 and self.cell_type[i, j+1, k] != 1:  # Not solid
                     n_neighbors += 1
                     if self.cell_type[i, j+1, k] == 0:  # Fluid
                         neighbors_sum += input_field[i, j+1, k]
-                    else:  # Air - use ghost pressure
-                        neighbors_sum += self.get_ghost_pressure(i, j, k, 2)
+                    else:  # Air - use p_air = 0
+                        neighbors_sum += self.p_air
                 
                 # -z direction
                 if k > 0 and self.cell_type[i, j, k-1] != 1:  # Not solid
                     n_neighbors += 1
                     if self.cell_type[i, j, k-1] == 0:  # Fluid
                         neighbors_sum += input_field[i, j, k-1]
-                    else:  # Air - use ghost pressure
-                        neighbors_sum += self.get_ghost_pressure(i, j, k, 5)
+                    else:  # Air - use p_air = 0
+                        neighbors_sum += self.p_air
                 
                 # +z direction
                 if k < self.nz-1 and self.cell_type[i, j, k+1] != 1:  # Not solid
                     n_neighbors += 1
                     if self.cell_type[i, j, k+1] == 0:  # Fluid
                         neighbors_sum += input_field[i, j, k+1]
-                    else:  # Air - use ghost pressure
-                        neighbors_sum += self.get_ghost_pressure(i, j, k, 4)
+                    else:  # Air - use p_air = 0
+                        neighbors_sum += self.p_air
                 
                 # Negative Laplacian: +n_neighbors * p_center - sum(p_neighbors)
                 # This is consistent with self.diag[i,j,k] = +n_neighbors * inv_dx²
@@ -521,6 +475,33 @@ class PCGSolver:
         return count
     
     @ti.kernel
+    def _count_air_boundaries(self) -> ti.i32:
+        """Count fluid cells that have at least one air neighbor (Dirichlet BC)"""
+        count = 0
+        for i, j, k in self.cell_type:
+            if self.cell_type[i, j, k] == 0:  # Fluid cell
+                has_air = False
+                if i > 0 and self.cell_type[i-1, j, k] == 2:
+                    has_air = True
+                if i < self.nx-1 and self.cell_type[i+1, j, k] == 2:
+                    has_air = True
+                if j > 0 and self.cell_type[i, j-1, k] == 2:
+                    has_air = True
+                if j < self.ny-1 and self.cell_type[i, j+1, k] == 2:
+                    has_air = True
+                if k > 0 and self.cell_type[i, j, k-1] == 2:
+                    has_air = True
+                if k < self.nz-1 and self.cell_type[i, j, k+1] == 2:
+                    has_air = True
+                if has_air:
+                    count += 1
+        return count
+    
+    def has_air_boundary(self) -> bool:
+        """Check if there are any fluid cells adjacent to air (Dirichlet BC)"""
+        return self._count_air_boundaries() > 0
+    
+    @ti.kernel
     def subtract_mean(self, field: ti.template(), mean: ti.f64):
         """Subtract mean from field in fluid cells"""
         for i, j, k in field:
@@ -555,8 +536,13 @@ class PCGSolver:
         # Setup RHS: b = -(ρ/Δt)∇·v*
         self.setup_rhs(div_v_star, rho, dt)
         
-        # Remove null space from RHS for Neumann BC stability
-        self.remove_null_space(self.rhs)
+        # Check if we have Dirichlet BC (air neighbors)
+        # If so, the matrix is not singular and we shouldn't remove null space
+        has_dirichlet = self.has_air_boundary()
+        
+        if not has_dirichlet:
+            # Only remove null space for pure Neumann BC (enclosed domain)
+            self.remove_null_space(self.rhs)
         
         # Setup preconditioner (for MIC/SSOR)
         self.setup_preconditioner()
@@ -596,8 +582,8 @@ class PCGSolver:
             # Update solution: x = x + alpha * p
             self.vector_axpy(alpha, self.p, self.pressure)
             
-            # Remove null space from pressure to prevent drift
-            self.remove_null_space(self.pressure)
+            # Note: Don't remove null space here - only needed for pure Neumann BC
+            # and it was already handled in the RHS setup
 
             # Update residual: r = r - alpha * Ap
             self.vector_axpy(-alpha, self.Ap, self.r)

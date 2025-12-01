@@ -47,12 +47,18 @@ z = Width (out-of-plane, cross-slope, 2m)
 
 ```
 reproduction/
-├── incompressible_mpm_solver.py    # Main iMPM solver class
+├── incompressible_mpm_solver.py    # Single-phase iMPM solver (fluid only)
+├── two_phase_mpm_solver.py         # Two-phase MPM solver (solid + fluid)
 ├── level_set_method.py             # Level set tracking with WENO3/RK3-TVD
 ├── pcg_solver.py                   # Pressure Poisson equation solver
+├── barrier_model.py                # Barrier contact mechanics
 ├── test_impm.py                    # Basic functionality tests
+├── run_two_phase_simulation.py     # Run two-phase debris flow simulation
+├── physics_config_paper_accurate.yaml  # Physical parameters configuration
 ├── examples/
 │   └── dam_break_3d.py             # 3D dam break benchmark
+├── simulation_output/
+│   └── two_phase_results/          # Two-phase simulation outputs
 └── README_iMPM.md                  # This documentation
 ```
 
@@ -232,12 +238,81 @@ See `PRECONDITIONER_INVESTIGATION.md` for detailed analysis and test results.
 3. **Level Set Method**: Osher & Fedkiw (2003) Level Set Methods
 4. **Surface Tension**: Brackbill et al. (1992) Continuum method for surface tension
 
+## Two-Phase MPM Solver
+
+The `two_phase_mpm_solver.py` implements a two-phase debris flow model:
+
+### Key Features
+
+1. **Solid Phase (Granular)**
+   - Drucker-Prager elastoplastic model with μ(I) rheology
+   - Computes stress from elastic deformation gradient
+   - Plastic return mapping for yielded states
+
+2. **Fluid Phase (Incompressible)**
+   - Follows fluid particles through the domain
+   - Responds to drag forces from solid phase
+
+3. **Two-Phase Coupling**
+   - Inter-phase drag force (Di Felice model)
+   - Solid volume fraction tracking on grid
+   - APIC/FLIP velocity transfer for both phases
+
+### Usage
+
+```python
+from two_phase_mpm_solver import TwoPhaseMPMSolver
+
+# Create solver
+solver = TwoPhaseMPMSolver(
+    nx=100, ny=25, nz=20,
+    dx=0.02,
+    rho_s=2650.0,          # Solid density
+    E_s=1e7,               # Young's modulus
+    friction_angle=26.0,   # Friction angle (degrees)
+    rho_f=1000.0,          # Fluid density
+    mu_f=0.01,             # Fluid viscosity
+    d_s=0.001,             # Particle diameter
+    phi_s0=0.55            # Initial solid volume fraction
+)
+
+# Initialize particles
+solver.init_particles(
+    x_min=0.04, x_max=0.44,
+    y_min=0.04, y_max=0.34,
+    z_min=0.04, z_max=0.44,
+    ppc=4
+)
+
+# Run simulation
+for step in range(3000):
+    solver.step()
+    
+    # Export particle data
+    data = solver.export_particles()
+    solid_pos = data['solid']['positions']
+    fluid_pos = data['fluid']['positions']
+```
+
+### Run Two-Phase Simulation
+
+```bash
+cd reproduction
+python run_two_phase_simulation.py
+```
+
+Outputs are saved to `simulation_output/two_phase_results/`:
+- `two_phase_morphology.png` - Time evolution of both phases
+- `two_phase_velocity.png` - Velocity fields and relative velocity
+- `two_phase_3d_view.png` - 3D visualization
+- `wave_front_evolution.png` - Wave front propagation
+
 ## Future Extensions
 
-1. **Multi-Phase Flows**: Extend to oil-water or gas-liquid systems
+1. **Enhanced Two-Phase Coupling**: Pore pressure effects, effective stress principle
 2. **Adaptive Refinement**: Dynamic grid refinement near interfaces  
 3. **Parallel Scaling**: MPI parallelization for large-scale simulations
-4. **Coupling**: Interface with solid mechanics solvers for FSI
+4. **Barrier Impact**: Full barrier contact mechanics with overflow tracking
 
 ## Citation
 
