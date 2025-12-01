@@ -1,0 +1,118 @@
+# Physics Configuration for Two-Phase MPM Debris Flow Impact
+# Based on Ng et al. (2023) - Paper-accurate parameters
+# This configuration maintains paper accuracy while ensuring numerical stability
+
+# Simulation Parameters (Paper-accurate)
+simulation:
+  total_time: 5.0                    # s, total simulation time (paper requirement)
+  gravity: 9.81                      # m/s², gravitational acceleration
+  slope_angle: 20.0                  # degrees, channel inclination (paper requirement)
+  barrier_height: 0.15               # m, barrier height (paper requirement)
+  barrier_spacing: 2.0               # m, distance between barriers
+  barrier_positions: [3.0, 5.0]      # m, x-positions of barriers
+  debris_volume: 500.0               # m³, initial debris volume (paper requirement)
+  domain_length: 10.0                # m, simulation domain length (paper requirement)
+  domain_width: 1.0                  # m, simulation domain width (paper requirement)
+  domain_height: 1.0                 # m, simulation domain height (paper requirement)
+
+# Material Properties (Table 1 from paper)
+fluid_phase:
+  density: 1000.0                    # kg/m³, fluid density
+  viscosity: 0.001                   # Pa·s, dynamic viscosity
+
+solid_phase:
+  density: 2650.0                    # kg/m³, solid density
+  particle_diameter: 0.001           # m, particle diameter (1 mm)
+  young_modulus: 10e6                # Pa, Young's modulus (10 MPa)
+  poisson_ratio: 0.3                 # -, Poisson's ratio
+  static_friction: 0.49              # -, static friction coefficient μ₁
+  dynamic_friction: 1.4              # -, dynamic friction coefficient μ₂
+  critical_solid_fraction: 0.56      # -, critical solid volume fraction φₘ
+  dilatancy_parameter: 4.7           # -, dilatancy parameter K₄
+  mu_i_parameter_a: 1.23             # -, μ(I) parameter a
+  mu_i_parameter_b: 0.31             # -, μ(I) parameter b
+  basal_friction: 0.4                # -, basal friction coefficient μ_bed
+
+# Numerical Parameters (Paper-accurate with stability adjustments)
+numerics:
+  # Grid parameters (paper-accurate)
+  mesh_barrier_ratio: 0.04           # mesh_size / barrier_height (paper requirement)
+  particles_per_cell: 16             # material points per background cell (paper requirement)
+  
+  # Time stepping (stability-adjusted)
+  cfl_factor: 0.01                   # CFL factor for stability (reduced from 0.1)
+  max_timestep: 1.0e-6              # s, maximum time step (reduced for stability)
+  
+  # Solver parameters (stability-adjusted)
+  pressure_tolerance: 1.0e-3        # pressure solver tolerance (relaxed for stability)
+  max_pressure_iterations: 500      # maximum pressure solver iterations
+  
+  # Contact parameters (stability-adjusted)
+  contact_stiffness: 10000000.0     # N/m, barrier contact stiffness (reduced for stability)
+  contact_damping: 100.0            # N·s/m, barrier contact damping (reduced for stability)
+  
+  # Output parameters
+  vtk_output_interval: 100          # steps between VTK outputs
+  metrics_output_interval: 10       # steps between metrics calculation
+  
+  # Level set parameters
+  level_set_reinit_interval: 10     # steps between level set reinitialization
+  level_set_tolerance: 1.0e-6       # level set convergence tolerance
+
+# Boundary Conditions
+boundary_conditions:
+  barrier_friction: 0.4             # -, barrier friction coefficient
+  basal_friction: 0.4               # -, basal friction coefficient
+  fluid_boundary: "free_slip"       # fluid boundary condition type
+  solid_boundary: "coulomb"         # solid boundary condition type
+
+# Barrier Spacing Study Parameters (Table 2 from paper)
+barrier_spacings:
+  - 1.5
+  - 2.0
+  - 2.5
+  - 3.0
+  - 3.5
+  - 4.0
+  - 4.5
+  - 5.0
+
+# Froude Number Study Parameters
+froude_numbers:
+  - 2.0
+  - 4.0
+  - 6.0
+
+# Domain Configuration
+domain:
+  aspect_ratio: 8.0                 # initial length-to-depth ratio
+  barrier_height_factor: 2.0        # barrier height as multiple of flow depth
+  channel_width: 10.0               # m, channel width (paper assumption)
+
+# Governing Equations (for reference)
+equations:
+  solid_momentum: "ρ̄s(Dvs/Dt) = ρ̄sg + ∇·σ' - fd - φ∇pf     [Eq. 5]"
+  fluid_momentum: "ρ̄f(Dvf/Dt) = ρ̄fg + ∇·Tf + fd - (1-φ)∇pf  [Eq. 6]"
+  incompressibility: "∇·vf = 0                                     [Eq. 9]"
+  fluid_stress: "Tf = ηf[1 + 5φ/2][∇vf + (∇vf)ᵀ]             [Eq. 10]"
+  equilibrium_solid_fraction: "φeq = φm/(1 + aIm)                 [Eq. 11]"
+  yield_surface_compaction: "fcompaction = g(φ)p' - aφ²[(γ̇p)²d²ρs + 2ηfγ̇p] [Eq. 15]"
+  yield_surface_shear: "fshear = √J₂ - μpp'                        [Eq. 17]"
+  friction_coefficient: "μp = μ₁ + (μ₂-μ₁)/(1+b/Im) + 5φIv/(2aIm)    [Eq. 18]"
+  dilation_angle: "β = K₄(φ - φeq)                           [Eq. 21]"
+  drag_force: "fd = 18φ(1-φ)ηf/d² F̂(vs - vf)               [Eq. 22]"
+
+# Validation Parameters
+validation:
+  experimental_data_path: "tests/experimental_data/"
+  analytical_solutions_path: "tests/fixtures/analytical_solutions.py"
+  tolerance_velocity: 0.1           # m/s, velocity validation tolerance
+  tolerance_force: 1000.0           # N, force validation tolerance
+  tolerance_pressure: 1000.0        # Pa, pressure validation tolerance
+
+# Performance Settings
+performance:
+  use_gpu: true                     # use GPU acceleration
+  gpu_memory_fraction: 0.8          # fraction of GPU memory to use
+  parallel_particles: true          # enable particle parallelization
+  sparse_storage: false             # use sparse storage for large domains
