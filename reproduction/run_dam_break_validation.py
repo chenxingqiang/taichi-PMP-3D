@@ -193,11 +193,8 @@ def run_dam_break_validation():
     snapshot_idx = 1
     
     for step in range(total_steps):
-        # Run one step (fluid only - using clear_grid and individual methods)
-        solver.clear_grid()
-        solver.p2g_fluid()
-        solver.grid_operations(1.0)  # Full gravity
-        solver.g2p_fluid()
+        # Run one step using the full step method (includes pressure solve)
+        solver.step()
         
         current_time = (step + 1) * dt
         

@@ -23,6 +23,9 @@ import math
 
 # Note: Taichi should be initialized by the caller before importing this module
 
+# Import PCG solver for pressure coupling
+from pcg_solver import PCGSolver
+
 
 @ti.data_oriented
 class DruckerPragerModel:
@@ -228,9 +231,20 @@ class TwoPhaseMPMSolver:
             max_particles, E=E_s * 0.01, nu=nu_s, friction_angle=friction_angle  # Reduce E by 100x
         )
         
-        # Calm period counter
+        # Calm period counter (reduce for faster startup)
         self.step_count = ti.field(dtype=ti.i32, shape=())
-        self.calm_steps = 500  # Number of steps to gradually apply forces
+        self.calm_steps = 100  # Reduced from 500 for faster flow development
+        
+        # ========== Pressure Solver for Incompressibility ==========
+        self.pcg_solver = PCGSolver(nx, ny, nz, dx, preconditioner='jacobi')
+        self.use_pressure_solve = True  # Enable pressure solve by default
+        
+        # Divergence and pressure gradient fields
+        self.grid_div_v = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # Velocity divergence
+        self.grid_pressure_grad = ti.Vector.field(3, dtype=ti.f64, shape=(nx, ny, nz))  # ∇p
+        
+        # Cell type for boundary conditions (0: fluid, 1: solid wall, 2: air)
+        self.cell_type = ti.field(dtype=ti.i32, shape=(nx, ny, nz))
         
         print(f"Two-Phase MPM Solver initialized:")
         print(f"  Grid: {nx} x {ny} x {nz}, dx = {dx}")
@@ -596,6 +610,210 @@ class TwoPhaseMPMSolver:
             # Advect position
             self.x_f[p] += self.dt * v_pic
     
+    # ========== Pressure Solver Methods ==========
+    
+    @ti.kernel
+    def classify_cells(self):
+        """Classify cells as fluid, solid wall, or air based on mass
+        
+        Cell types:
+        - 0: Fluid (has fluid mass)
+        - 1: Solid wall (boundary)
+        - 2: Air (no mass, free surface)
+        """
+        for i, j, k in self.cell_type:
+            # Check if cell has fluid
+            has_fluid = self.grid_m_f[i, j, k] > 1e-10 or self.grid_m_s[i, j, k] > 1e-10
+            
+            # Boundary cells are solid walls
+            is_boundary = (i < 2 or i >= self.nx - 2 or
+                          j < 2 or j >= self.ny - 2 or
+                          k < 2 or k >= self.nz - 2)
+            
+            if is_boundary and j < 2:  # Bottom is solid wall
+                self.cell_type[i, j, k] = 1  # Solid wall
+            elif has_fluid:
+                self.cell_type[i, j, k] = 0  # Fluid
+            else:
+                self.cell_type[i, j, k] = 2  # Air (free surface)
+    
+    @ti.kernel
+    def compute_velocity_divergence(self):
+        """Compute divergence of the fluid velocity field: ∇·v_f
+        
+        For incompressible flow: ∇·v = 0
+        We compute the divergence to use as RHS in pressure Poisson equation.
+        """
+        for i, j, k in self.grid_div_v:
+            if self.cell_type[i, j, k] == 0:  # Fluid cells only
+                div_v = 0.0
+                
+                # Central difference for interior, one-sided at boundaries
+                # x-direction: ∂v_x/∂x
+                if i > 0 and i < self.nx - 1:
+                    # Check if neighbors are not solid walls
+                    v_xp = self.grid_v_f[i+1, j, k][0] if self.cell_type[i+1, j, k] != 1 else self.grid_v_f[i, j, k][0]
+                    v_xm = self.grid_v_f[i-1, j, k][0] if self.cell_type[i-1, j, k] != 1 else self.grid_v_f[i, j, k][0]
+                    div_v += (v_xp - v_xm) / (2.0 * self.dx)
+                elif i == 0:
+                    div_v += (self.grid_v_f[i+1, j, k][0] - self.grid_v_f[i, j, k][0]) / self.dx
+                else:
+                    div_v += (self.grid_v_f[i, j, k][0] - self.grid_v_f[i-1, j, k][0]) / self.dx
+                
+                # y-direction: ∂v_y/∂y
+                if j > 0 and j < self.ny - 1:
+                    v_yp = self.grid_v_f[i, j+1, k][1] if self.cell_type[i, j+1, k] != 1 else self.grid_v_f[i, j, k][1]
+                    v_ym = self.grid_v_f[i, j-1, k][1] if self.cell_type[i, j-1, k] != 1 else self.grid_v_f[i, j, k][1]
+                    div_v += (v_yp - v_ym) / (2.0 * self.dx)
+                elif j == 0:
+                    div_v += (self.grid_v_f[i, j+1, k][1] - self.grid_v_f[i, j, k][1]) / self.dx
+                else:
+                    div_v += (self.grid_v_f[i, j, k][1] - self.grid_v_f[i, j-1, k][1]) / self.dx
+                
+                # z-direction: ∂v_z/∂z
+                if k > 0 and k < self.nz - 1:
+                    v_zp = self.grid_v_f[i, j, k+1][2] if self.cell_type[i, j, k+1] != 1 else self.grid_v_f[i, j, k][2]
+                    v_zm = self.grid_v_f[i, j, k-1][2] if self.cell_type[i, j, k-1] != 1 else self.grid_v_f[i, j, k][2]
+                    div_v += (v_zp - v_zm) / (2.0 * self.dx)
+                elif k == 0:
+                    div_v += (self.grid_v_f[i, j, k+1][2] - self.grid_v_f[i, j, k][2]) / self.dx
+                else:
+                    div_v += (self.grid_v_f[i, j, k][2] - self.grid_v_f[i, j, k-1][2]) / self.dx
+                
+                self.grid_div_v[i, j, k] = div_v
+            else:
+                self.grid_div_v[i, j, k] = 0.0
+    
+    @ti.kernel
+    def compute_pressure_gradient_kernel(self, pressure: ti.template()):
+        """Compute pressure gradient ∇p at each grid node
+        
+        Uses central differences for interior cells, one-sided at boundaries.
+        
+        Args:
+            pressure: The pressure field from PCG solver
+        """
+        for i, j, k in self.grid_pressure_grad:
+            if self.cell_type[i, j, k] == 0:  # Fluid cells only
+                grad_p = ti.Vector([0.0, 0.0, 0.0])
+                
+                # x-direction: ∂p/∂x
+                if i > 0 and i < self.nx - 1:
+                    if self.cell_type[i+1, j, k] != 1 and self.cell_type[i-1, j, k] != 1:
+                        grad_p[0] = (pressure[i+1, j, k] - pressure[i-1, j, k]) / (2.0 * self.dx)
+                    elif self.cell_type[i+1, j, k] == 1:  # Right is wall
+                        grad_p[0] = (pressure[i, j, k] - pressure[i-1, j, k]) / self.dx
+                    elif self.cell_type[i-1, j, k] == 1:  # Left is wall
+                        grad_p[0] = (pressure[i+1, j, k] - pressure[i, j, k]) / self.dx
+                    else:
+                        grad_p[0] = (pressure[i+1, j, k] - pressure[i-1, j, k]) / (2.0 * self.dx)
+                elif i == 0:
+                    grad_p[0] = (pressure[i+1, j, k] - pressure[i, j, k]) / self.dx
+                else:
+                    grad_p[0] = (pressure[i, j, k] - pressure[i-1, j, k]) / self.dx
+                
+                # y-direction: ∂p/∂y
+                if j > 0 and j < self.ny - 1:
+                    if self.cell_type[i, j+1, k] != 1 and self.cell_type[i, j-1, k] != 1:
+                        grad_p[1] = (pressure[i, j+1, k] - pressure[i, j-1, k]) / (2.0 * self.dx)
+                    elif self.cell_type[i, j+1, k] == 1:
+                        grad_p[1] = (pressure[i, j, k] - pressure[i, j-1, k]) / self.dx
+                    elif self.cell_type[i, j-1, k] == 1:
+                        grad_p[1] = (pressure[i, j+1, k] - pressure[i, j, k]) / self.dx
+                    else:
+                        grad_p[1] = (pressure[i, j+1, k] - pressure[i, j-1, k]) / (2.0 * self.dx)
+                elif j == 0:
+                    grad_p[1] = (pressure[i, j+1, k] - pressure[i, j, k]) / self.dx
+                else:
+                    grad_p[1] = (pressure[i, j, k] - pressure[i, j-1, k]) / self.dx
+                
+                # z-direction: ∂p/∂z
+                if k > 0 and k < self.nz - 1:
+                    if self.cell_type[i, j, k+1] != 1 and self.cell_type[i, j, k-1] != 1:
+                        grad_p[2] = (pressure[i, j, k+1] - pressure[i, j, k-1]) / (2.0 * self.dx)
+                    elif self.cell_type[i, j, k+1] == 1:
+                        grad_p[2] = (pressure[i, j, k] - pressure[i, j, k-1]) / self.dx
+                    elif self.cell_type[i, j, k-1] == 1:
+                        grad_p[2] = (pressure[i, j, k+1] - pressure[i, j, k]) / self.dx
+                    else:
+                        grad_p[2] = (pressure[i, j, k+1] - pressure[i, j, k-1]) / (2.0 * self.dx)
+                elif k == 0:
+                    grad_p[2] = (pressure[i, j, k+1] - pressure[i, j, k]) / self.dx
+                else:
+                    grad_p[2] = (pressure[i, j, k] - pressure[i, j, k-1]) / self.dx
+                
+                self.grid_pressure_grad[i, j, k] = grad_p
+            else:
+                self.grid_pressure_grad[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
+    
+    def compute_pressure_gradient(self):
+        """Wrapper to compute pressure gradient"""
+        self.compute_pressure_gradient_kernel(self.pcg_solver.pressure)
+    
+    @ti.kernel
+    def apply_pressure_gradient(self):
+        """Apply pressure gradient to correct velocity field
+        
+        For two-phase flow:
+        - Solid phase: v_s -= (dt/ρ_s) * φ * ∇p       [Eq. 5]
+        - Fluid phase: v_f -= (dt/ρ_f) * (1-φ) * ∇p   [Eq. 6]
+        
+        This enforces incompressibility of the mixture.
+        """
+        for i, j, k in self.grid_v_f:
+            if self.cell_type[i, j, k] == 0:  # Fluid cells only
+                grad_p = self.grid_pressure_grad[i, j, k]
+                phi = self.grid_phi_s[i, j, k]  # Solid volume fraction
+                
+                # Fluid phase correction: v_f -= (dt/ρ_f) * (1-φ) * ∇p
+                phi_l = 1.0 - ti.min(phi, 0.65)  # Liquid fraction (clamp phi)
+                if self.grid_m_f[i, j, k] > 1e-10:
+                    self.grid_v_f[i, j, k] -= (self.dt / self.rho_f) * phi_l * grad_p
+                
+                # Solid phase correction: v_s -= (dt/ρ_s) * φ * ∇p
+                if self.grid_m_s[i, j, k] > 1e-10:
+                    self.grid_v_s[i, j, k] -= (self.dt / self.rho_s) * phi * grad_p
+    
+    @ti.kernel
+    def sync_cell_types(self):
+        """Sync cell types from our classification to PCG solver"""
+        for i, j, k in self.cell_type:
+            self.pcg_solver.cell_type[i, j, k] = self.cell_type[i, j, k]
+    
+    def solve_pressure(self):
+        """Solve pressure Poisson equation and apply pressure gradient
+        
+        Steps:
+        1. Classify cells (fluid, wall, air)
+        2. Compute velocity divergence ∇·v
+        3. Solve ∇²p = (ρ/dt) * ∇·v using PCG
+        4. Compute pressure gradient ∇p
+        5. Apply pressure gradient to correct velocities
+        """
+        # Step 1: Classify cells
+        self.classify_cells()
+        self.sync_cell_types()
+        
+        # Step 2: Compute velocity divergence
+        self.compute_velocity_divergence()
+        
+        # Step 3: Solve pressure Poisson equation
+        # Use weighted density for mixture
+        rho_mix = self.rho_f  # Use fluid density for simplicity
+        self.pcg_solver.solve_pcg(
+            self.grid_div_v, 
+            max_iter=100, 
+            tol=1e-4, 
+            rho=rho_mix, 
+            dt=self.dt
+        )
+        
+        # Step 4: Compute pressure gradient
+        self.compute_pressure_gradient()
+        
+        # Step 5: Apply pressure gradient to correct velocities
+        self.apply_pressure_gradient()
+    
     def step(self):
         """Perform one simulation step"""
         # Compute gravity factor for calm period
@@ -606,6 +824,11 @@ class TwoPhaseMPMSolver:
         self.p2g_solid()
         self.p2g_fluid()
         self.grid_operations(gravity_factor)
+        
+        # Solve pressure and apply correction (incompressibility)
+        if self.use_pressure_solve:
+            self.solve_pressure()
+        
         self.g2p_solid()
         self.g2p_fluid()
         
