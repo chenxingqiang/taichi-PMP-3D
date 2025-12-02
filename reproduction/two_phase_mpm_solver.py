@@ -433,50 +433,65 @@ class TwoPhaseMPMSolver:
                 self.grid_v_s[i, j, k][d] = ti.max(ti.min(self.grid_v_s[i, j, k][d], max_grid_vel), -max_grid_vel)
                 self.grid_v_f[i, j, k][d] = ti.max(ti.min(self.grid_v_f[i, j, k][d], max_grid_vel), -max_grid_vel)
             
-            # Boundary conditions with friction
-            friction_coeff = 0.4  # Bottom friction
+            # Boundary conditions - apply to both phases independently
+            boundary_layer = 2  # Boundary layer thickness in cells
             
-            # Left boundary (x = 0)
-            if i < 3 and self.grid_v_s[i, j, k][0] < 0:
-                self.grid_v_s[i, j, k][0] = 0
-                self.grid_v_f[i, j, k][0] = 0
-            # Right boundary
-            if i >= self.nx - 3 and self.grid_v_s[i, j, k][0] > 0:
-                self.grid_v_s[i, j, k][0] = 0
-                self.grid_v_f[i, j, k][0] = 0
-            
-            # Bottom boundary with Coulomb friction
-            if j < 3 and self.grid_v_s[i, j, k][1] < 0:
-                v_n = -self.grid_v_s[i, j, k][1]  # Normal velocity (into wall)
-                v_t_x = self.grid_v_s[i, j, k][0]
-                v_t_z = self.grid_v_s[i, j, k][2]
-                v_t_mag = ti.sqrt(v_t_x**2 + v_t_z**2 + 1e-10)
-                
-                # Apply Coulomb friction
-                friction_force = friction_coeff * v_n
-                if v_t_mag > friction_force:
-                    scale = (v_t_mag - friction_force) / v_t_mag
-                    self.grid_v_s[i, j, k][0] *= scale
-                    self.grid_v_s[i, j, k][2] *= scale
-                else:
+            # Left boundary (x = 0) - prevent outflow
+            if i < boundary_layer:
+                if self.grid_v_s[i, j, k][0] < 0:
                     self.grid_v_s[i, j, k][0] = 0
-                    self.grid_v_s[i, j, k][2] = 0
+                if self.grid_v_f[i, j, k][0] < 0:
+                    self.grid_v_f[i, j, k][0] = 0
+            
+            # Right boundary - prevent outflow
+            if i >= self.nx - boundary_layer:
+                if self.grid_v_s[i, j, k][0] > 0:
+                    self.grid_v_s[i, j, k][0] = 0
+                if self.grid_v_f[i, j, k][0] > 0:
+                    self.grid_v_f[i, j, k][0] = 0
+            
+            # Bottom boundary - no-slip with friction for solid, free-slip for fluid
+            if j < boundary_layer:
+                # Solid: Coulomb friction
+                if self.grid_v_s[i, j, k][1] < 0:
+                    friction_coeff = 0.4
+                    v_n = -self.grid_v_s[i, j, k][1]
+                    v_t_x = self.grid_v_s[i, j, k][0]
+                    v_t_z = self.grid_v_s[i, j, k][2]
+                    v_t_mag = ti.sqrt(v_t_x**2 + v_t_z**2 + 1e-10)
+                    
+                    friction_force = friction_coeff * v_n
+                    if v_t_mag > friction_force:
+                        scale = (v_t_mag - friction_force) / v_t_mag
+                        self.grid_v_s[i, j, k][0] *= scale
+                        self.grid_v_s[i, j, k][2] *= scale
+                    else:
+                        self.grid_v_s[i, j, k][0] = 0
+                        self.grid_v_s[i, j, k][2] = 0
+                    self.grid_v_s[i, j, k][1] = 0
                 
-                self.grid_v_s[i, j, k][1] = 0  # No penetration
-                self.grid_v_f[i, j, k][1] = 0
+                # Fluid: free-slip (only normal velocity = 0)
+                if self.grid_v_f[i, j, k][1] < 0:
+                    self.grid_v_f[i, j, k][1] = 0
             
             # Top boundary
-            if j >= self.ny - 3 and self.grid_v_s[i, j, k][1] > 0:
-                self.grid_v_s[i, j, k][1] = 0
-                self.grid_v_f[i, j, k][1] = 0
+            if j >= self.ny - boundary_layer:
+                if self.grid_v_s[i, j, k][1] > 0:
+                    self.grid_v_s[i, j, k][1] = 0
+                if self.grid_v_f[i, j, k][1] > 0:
+                    self.grid_v_f[i, j, k][1] = 0
             
-            # Front/back boundaries
-            if k < 3 and self.grid_v_s[i, j, k][2] < 0:
-                self.grid_v_s[i, j, k][2] = 0
-                self.grid_v_f[i, j, k][2] = 0
-            if k >= self.nz - 3 and self.grid_v_s[i, j, k][2] > 0:
-                self.grid_v_s[i, j, k][2] = 0
-                self.grid_v_f[i, j, k][2] = 0
+            # Front/back boundaries (z direction)
+            if k < boundary_layer:
+                if self.grid_v_s[i, j, k][2] < 0:
+                    self.grid_v_s[i, j, k][2] = 0
+                if self.grid_v_f[i, j, k][2] < 0:
+                    self.grid_v_f[i, j, k][2] = 0
+            if k >= self.nz - boundary_layer:
+                if self.grid_v_s[i, j, k][2] > 0:
+                    self.grid_v_s[i, j, k][2] = 0
+                if self.grid_v_f[i, j, k][2] > 0:
+                    self.grid_v_f[i, j, k][2] = 0
     
     @ti.kernel
     def g2p_solid(self):
