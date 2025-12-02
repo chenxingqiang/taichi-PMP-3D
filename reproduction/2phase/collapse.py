@@ -473,7 +473,9 @@ def P2G():
                 grid_sv[base + offset] += weight * (mass_s * v_s[p] + affine @ dpos)
             else:
                 grid_sv[base + offset] += weight * (mass_s * v_s[p])
-            grid_phi_s[base + offset] += weight * (1 - n_s[p])
+            # Project solid volume fraction (n_s) to grid
+            # n_s[p] is solid fraction, grid_phi_s should store solid fraction
+            grid_phi_s[base + offset] += weight * n_s[p]
             grid_weight[base + offset] += weight
             grid_sm[base + offset] += weight * mass_s
             # grid_sf[base + offset] += -p_vol * stress_3D @ weight_grad
@@ -1145,17 +1147,19 @@ def G2P():
 
 @ti.kernel
 def G2P_l():
-    # G2P
+    # G2P for liquid phase
 
     for p in range(n_l_particles[None]):
-        base = (x_s[p] * inv_dx - 0.5).cast(int)
-        fx = x_s[p] * inv_dx - base.cast(float)
+        # BUG FIX: Use x_l[p] instead of x_s[p] for liquid particles!
+        base = (x_l[p] * inv_dx - 0.5).cast(int)
+        fx = x_l[p] * inv_dx - base.cast(float)
         w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1.0) ** 2, 0.5 * (fx - 0.5) ** 2]
         grad_w = [(fx - 1.5) * inv_dx, (2 - 2 * fx) * inv_dx, (fx - 0.5) * inv_dx]
         FLIP_a_l = ti.Vector.zero(float, dim)  # reset FLIP a
         If_a_l = ti.Vector.zero(float, dim)  # reset If_a a
         DEMf_a_l = ti.Vector.zero(float, dim)  # reset DEMf_a
-        new_FLIP_v_l = v_s[p]
+        # BUG FIX: Use v_l[p] instead of v_s[p] for liquid particles!
+        new_FLIP_v_l = v_l[p]
         new_PIC_v_l = ti.Vector.zero(float, dim)
         new_C_l = ti.Matrix.zero(float, dim, dim)
         grad_v_l = ti.Matrix.zero(float, dim, dim)
@@ -1163,7 +1167,11 @@ def G2P_l():
             offset = ti.Vector([i, j, k])
             dpos = (offset.cast(float) - fx) * dx
             g_v = grid_lv[base + offset]
-            mixture_g_v = grid_lv[base + offset] * (1 - grid_phi_s[base + offset]) - grid_phi_s[base + offset] * grid_sv[base + offset]
+            # Mixture velocity gradient for liquid deformation update
+            # v_mix = φ_l * v_l + φ_s * v_s (volume-averaged velocity)
+            phi_s_local = grid_phi_s[base + offset]
+            phi_l_local = 1.0 - phi_s_local
+            mixture_g_v = phi_l_local * grid_lv[base + offset] + phi_s_local * grid_sv[base + offset]
             g_old_v = grid_l_old_v[base + offset]
             weight = w[i][0] * w[j][1] * w[k][2]
             weight_grad = ti.Vector(
@@ -1306,28 +1314,30 @@ def G2P_l():
             if (my_DEM_pillar.sf_type[i] == 1):
                 my_DEM_pillar.v3f_fn[i] += gravity[None] * my_DEM_pillar.sf_mass[i]
 
-        # MP-DEM coupling
+        # MP-DEM coupling for liquid particles
+        # BUG FIX: Use x_l[p] and v_l[p] for liquid particles, not x_s/v_s!
         for p in range(n_l_particles[None]):
-            can_contact = my_DEM_pillar.bounding_sphere_check(x_p=x_s[p], bs_r=0.05)
+            can_contact = my_DEM_pillar.bounding_sphere_check(x_p=x_l[p], bs_r=0.05)
             if (can_contact):
-                f_DEM_to_p_total = my_DEM_pillar.get_contact_force_MPM_potential(x_p=x_s[p],
-                                                                                 v_p=v_s[p],
+                f_DEM_to_p_total = my_DEM_pillar.get_contact_force_MPM_potential(x_p=x_l[p],
+                                                                                 v_p=v_l[p],
                                                                                  potential_coeff_k=potential_coeff_k,
                                                                                  r=DEM_r,
                                                                                  Cn=C_n,
-                                                                                 m=mass_s,
+                                                                                 m=mass_l,  # Use liquid mass
                                                                                  targettype=1)
-                DEM_force[p] = f_DEM_to_p_total
-                DEM_shear_force[p] = ti.Vector.zero(float, dim)  # we do not compute shear force for now
+                DEM_force_l[p] = f_DEM_to_p_total  # Use DEM_force_l for liquid
+                DEM_shear_force_l[p] = ti.Vector.zero(float, dim)
 
         # DEM time integration (frozen for now)
         for i in range(n_pillar):
             if (my_DEM_pillar.sf_type[i] == 1):
                 my_DEM_pillar.time_integration_semi_explicit(i, dt)
     else:
-        for p in range(n_s_particles[None]):
-            DEM_force[p] = ti.Vector.zero(float, dim)
-            DEM_shear_force[p] = ti.Vector.zero(float, dim)
+        # Reset DEM forces for liquid particles
+        for p in range(n_l_particles[None]):
+            DEM_force_l[p] = ti.Vector.zero(float, dim)
+            DEM_shear_force_l[p] = ti.Vector.zero(float, dim)
 
 
 
