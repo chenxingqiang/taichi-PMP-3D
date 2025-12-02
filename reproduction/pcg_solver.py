@@ -10,11 +10,17 @@ Key features:
 - Multiple preconditioners: Jacobi, MIC (Modified Incomplete Cholesky), SSOR
 - Support for Neumann boundary conditions at solid walls
 - Semi-staggered grid layout (pressure at cell centers)
+- Two-phase flow support with porosity-weighted pressure gradient
 
 Mathematical framework:
 - Linear system: Ap = b where A is the discrete Laplacian
 - Ghost cells: p^G = (p^fs + (θ-1)p^f)/θ for free surface BCs
 - Solid wall BCs: ∇p·n = 0 (no penetration condition)
+
+Two-phase flow equations (from paper):
+- Solid momentum: ρ̄s(Dvs/Dt) = ρ̄sg + ∇·σ' - fd - φ∇pf     [Eq. 5]
+- Fluid momentum: ρ̄f(Dvf/Dt) = ρ̄fg + ∇·Tf + fd - (1-φ)∇pf  [Eq. 6]
+- The pore pressure gradient is shared between phases with porosity weighting
 """
 
 import taichi as ti
@@ -70,6 +76,11 @@ class PCGSolver:
         
         # SSOR relaxation parameter
         self.omega = 1.7  # Optimal typically between 1.5-1.9
+        
+        # Two-phase flow support: porosity field
+        self.porosity = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # φ: solid volume fraction
+        self.pressure_gradient = ti.Vector.field(3, dtype=ti.f64, shape=(nx, ny, nz))  # ∇p
+        self.two_phase_mode = False  # Flag for two-phase flow mode
 
         print(f"PCG Solver initialized for {nx}x{ny}x{nz} grid")
         print(f"  Preconditioner: {preconditioner.upper()}")
@@ -80,6 +91,11 @@ class PCGSolver:
     def compute_diagonal(self):
         """Compute diagonal entries of the negative Laplacian matrix (-∇²)
         
+        Following Bridson's approach (Figure 5.4):
+        - For SOLID cell boundary: delete mention of that p AND reduce the coefficient
+          in front of p_{i,j} by one
+        - The coefficient in front of p_{i,j} = number of NON-SOLID grid cell neighbors
+        
         We use -∇² instead of ∇² to make the matrix positive semi-definite,
         which is required for PCG convergence.
         
@@ -89,6 +105,7 @@ class PCGSolver:
         for i, j, k in self.diag:
             if self.cell_type[i, j, k] == 0:  # Fluid cells
                 # Count all non-solid neighbors (fluid + air)
+                # This implements Bridson's rule: diagonal = number of non-solid neighbors
                 n_neighbors = 0.0
                 
                 # Check -x direction
@@ -111,6 +128,7 @@ class PCGSolver:
                     n_neighbors += 1.0
                 
                 # Diagonal for negative Laplacian -∇² (positive definite)
+                # coefficient = n_non_solid_neighbors / dx²
                 self.diag[i, j, k] = n_neighbors * self.inv_dx2  # Positive!
                 
                 # Ensure non-zero diagonal for numerical stability
@@ -293,6 +311,115 @@ class PCGSolver:
         for i, j, k in self.rhs:
             if self.cell_type[i, j, k] == 0:  # Fluid cells only
                 self.rhs[i, j, k] = neg_rho_over_dt * div_v_star[i, j, k]
+            else:
+                self.rhs[i, j, k] = 0.0
+
+    @ti.kernel
+    def setup_rhs_with_solid_velocity(self, div_v_star: ti.template(), 
+                                       v_star: ti.template(),
+                                       v_solid: ti.template(),
+                                       rho: ti.f64, dt: ti.f64):
+        """Setup RHS with solid boundary velocity contribution (Bridson Figure 5.4)
+        
+        For solid boundaries, we need to modify RHS to account for solid velocities:
+        - When neighbor is SOLID, add: scale * (u_fluid - u_solid) to RHS
+        
+        This ensures the pressure solve produces correct velocity at solid boundaries:
+        ∂p/∂n = ρ/dt * (u_fluid - u_solid) · n
+        
+        Args:
+            div_v_star: Velocity divergence field
+            v_star: Intermediate velocity field (3D vector field)
+            v_solid: Solid velocity field (3D vector field, can be zero for static solids)
+            rho: Fluid density
+            dt: Time step
+        """
+        scale = 1.0 / self.dx
+        neg_rho_over_dt = -rho / dt
+        
+        for i, j, k in self.rhs:
+            if self.cell_type[i, j, k] == 0:  # Fluid cells only
+                # Start with divergence term
+                rhs_val = neg_rho_over_dt * div_v_star[i, j, k]
+                
+                # Add solid velocity contributions (from Bridson Figure 5.4)
+                # -x direction: if label(i-1,j,k)==SOLID
+                if i > 0 and self.cell_type[i-1, j, k] == 1:  # Solid
+                    # rhs -= scale * (u(i,j,k) - u_solid(i,j,k))
+                    # For negative Laplacian formulation, we add instead
+                    rhs_val += scale * (v_star[i, j, k][0] - v_solid[i-1, j, k][0])
+                
+                # +x direction: if label(i+1,j,k)==SOLID
+                if i < self.nx-1 and self.cell_type[i+1, j, k] == 1:  # Solid
+                    # rhs += scale * (u(i+1,j,k) - u_solid(i+1,j,k))
+                    rhs_val -= scale * (v_star[i+1, j, k][0] - v_solid[i+1, j, k][0])
+                
+                # -y direction: if label(i,j-1,k)==SOLID
+                if j > 0 and self.cell_type[i, j-1, k] == 1:  # Solid
+                    rhs_val += scale * (v_star[i, j, k][1] - v_solid[i, j-1, k][1])
+                
+                # +y direction: if label(i,j+1,k)==SOLID
+                if j < self.ny-1 and self.cell_type[i, j+1, k] == 1:  # Solid
+                    rhs_val -= scale * (v_star[i, j+1, k][1] - v_solid[i, j+1, k][1])
+                
+                # -z direction: if label(i,j,k-1)==SOLID
+                if k > 0 and self.cell_type[i, j, k-1] == 1:  # Solid
+                    rhs_val += scale * (v_star[i, j, k][2] - v_solid[i, j, k-1][2])
+                
+                # +z direction: if label(i,j,k+1)==SOLID
+                if k < self.nz-1 and self.cell_type[i, j, k+1] == 1:  # Solid
+                    rhs_val -= scale * (v_star[i, j, k+1][2] - v_solid[i, j, k+1][2])
+                
+                self.rhs[i, j, k] = rhs_val
+            else:
+                self.rhs[i, j, k] = 0.0
+
+    @ti.kernel
+    def setup_rhs_with_static_solid(self, div_v_star: ti.template(), 
+                                     v_star: ti.template(),
+                                     rho: ti.f64, dt: ti.f64):
+        """Setup RHS for static solid boundaries (u_solid = 0)
+        
+        Simplified version of setup_rhs_with_solid_velocity for static solids.
+        This is the most common case in MPM simulations where walls don't move.
+        
+        The key modification from Bridson Figure 5.4:
+        - When neighbor is SOLID: rhs ± scale * u_fluid
+        """
+        scale = 1.0 / self.dx
+        neg_rho_over_dt = -rho / dt
+        
+        for i, j, k in self.rhs:
+            if self.cell_type[i, j, k] == 0:  # Fluid cells only
+                # Start with divergence term
+                rhs_val = neg_rho_over_dt * div_v_star[i, j, k]
+                
+                # Add static solid velocity contributions (u_solid = 0)
+                # -x direction
+                if i > 0 and self.cell_type[i-1, j, k] == 1:
+                    rhs_val += scale * v_star[i, j, k][0]
+                
+                # +x direction
+                if i < self.nx-1 and self.cell_type[i+1, j, k] == 1:
+                    rhs_val -= scale * v_star[i+1, j, k][0]
+                
+                # -y direction
+                if j > 0 and self.cell_type[i, j-1, k] == 1:
+                    rhs_val += scale * v_star[i, j, k][1]
+                
+                # +y direction
+                if j < self.ny-1 and self.cell_type[i, j+1, k] == 1:
+                    rhs_val -= scale * v_star[i, j+1, k][1]
+                
+                # -z direction
+                if k > 0 and self.cell_type[i, j, k-1] == 1:
+                    rhs_val += scale * v_star[i, j, k][2]
+                
+                # +z direction
+                if k < self.nz-1 and self.cell_type[i, j, k+1] == 1:
+                    rhs_val -= scale * v_star[i, j, k+1][2]
+                
+                self.rhs[i, j, k] = rhs_val
             else:
                 self.rhs[i, j, k] = 0.0
 
@@ -523,7 +650,8 @@ class PCGSolver:
 
     # ==================== Main Solve Method ====================
 
-    def solve_pcg(self, div_v_star, max_iter=200, tol=1e-4, rho=1000.0, dt=1e-4):
+    def solve_pcg(self, div_v_star, max_iter=200, tol=1e-4, rho=1000.0, dt=1e-4,
+                  v_star=None, v_solid=None, use_solid_bc=False):
         """Solve pressure Poisson equation using PCG
         
         Args:
@@ -532,9 +660,21 @@ class PCGSolver:
             tol: Convergence tolerance
             rho: Fluid density (kg/m³)
             dt: Time step (s)
+            v_star: Intermediate velocity field (required if use_solid_bc=True)
+            v_solid: Solid velocity field (optional, defaults to zero/static)
+            use_solid_bc: Whether to use solid boundary velocity correction (Bridson 5.4)
         """
-        # Setup RHS: b = -(ρ/Δt)∇·v*
-        self.setup_rhs(div_v_star, rho, dt)
+        # Setup RHS based on boundary condition mode
+        if use_solid_bc and v_star is not None:
+            if v_solid is not None:
+                # Full solid velocity treatment
+                self.setup_rhs_with_solid_velocity(div_v_star, v_star, v_solid, rho, dt)
+            else:
+                # Static solid (u_solid = 0)
+                self.setup_rhs_with_static_solid(div_v_star, v_star, rho, dt)
+        else:
+            # Standard RHS setup
+            self.setup_rhs(div_v_star, rho, dt)
         
         # Check if we have Dirichlet BC (air neighbors)
         # If so, the matrix is not singular and we shouldn't remove null space
@@ -672,3 +812,345 @@ class PCGSolver:
                 max_pressure = max(max_pressure, self.pressure[i, j, k])
                 min_pressure = min(min_pressure, self.pressure[i, j, k])
         return max_pressure - min_pressure
+
+    # ==================== Two-Phase Flow Methods ====================
+    
+    def set_two_phase_mode(self, enabled: bool):
+        """Enable or disable two-phase flow mode
+        
+        When enabled, pressure gradient calculations consider porosity weighting:
+        - Solid phase receives: -φ∇pf
+        - Fluid phase receives: -(1-φ)∇pf
+        """
+        self.two_phase_mode = enabled
+        if enabled:
+            print("  Two-phase flow mode: ENABLED")
+    
+    @ti.kernel
+    def update_porosity(self, porosity_field: ti.template()):
+        """Update porosity field from external source (e.g., from two-phase solver)
+        
+        Args:
+            porosity_field: External field containing solid volume fraction φ
+        """
+        for i, j, k in self.porosity:
+            if i < porosity_field.shape[0] and j < porosity_field.shape[1] and k < porosity_field.shape[2]:
+                self.porosity[i, j, k] = porosity_field[i, j, k]
+            else:
+                self.porosity[i, j, k] = 0.0
+
+    @ti.kernel
+    def compute_pressure_gradient(self):
+        """Compute pressure gradient ∇p at each cell center
+        
+        Uses central differences for interior cells and one-sided differences at boundaries.
+        The gradient is stored for later use in computing porosity-weighted contributions.
+        """
+        for i, j, k in self.pressure_gradient:
+            grad_p_x = 0.0
+            grad_p_y = 0.0
+            grad_p_z = 0.0
+            
+            # X-direction gradient
+            if i == 0:
+                grad_p_x = (self.pressure[i+1, j, k] - self.pressure[i, j, k]) / self.dx
+            elif i == self.nx - 1:
+                grad_p_x = (self.pressure[i, j, k] - self.pressure[i-1, j, k]) / self.dx
+            else:
+                grad_p_x = (self.pressure[i+1, j, k] - self.pressure[i-1, j, k]) / (2.0 * self.dx)
+            
+            # Y-direction gradient
+            if j == 0:
+                grad_p_y = (self.pressure[i, j+1, k] - self.pressure[i, j, k]) / self.dx
+            elif j == self.ny - 1:
+                grad_p_y = (self.pressure[i, j, k] - self.pressure[i, j-1, k]) / self.dx
+            else:
+                grad_p_y = (self.pressure[i, j+1, k] - self.pressure[i, j-1, k]) / (2.0 * self.dx)
+            
+            # Z-direction gradient
+            if k == 0:
+                grad_p_z = (self.pressure[i, j, k+1] - self.pressure[i, j, k]) / self.dx
+            elif k == self.nz - 1:
+                grad_p_z = (self.pressure[i, j, k] - self.pressure[i, j, k-1]) / self.dx
+            else:
+                grad_p_z = (self.pressure[i, j, k+1] - self.pressure[i, j, k-1]) / (2.0 * self.dx)
+            
+            self.pressure_gradient[i, j, k] = ti.Vector([grad_p_x, grad_p_y, grad_p_z])
+
+    @ti.kernel
+    def get_solid_phase_pressure_gradient(self, output_field: ti.template()):
+        """Get porosity-weighted pressure gradient for solid phase: -φ∇pf
+        
+        This implements the pressure gradient term in the solid momentum equation [Eq. 5]:
+        ρ̄s(Dvs/Dt) = ρ̄sg + ∇·σ' - fd - φ∇pf
+        
+        Args:
+            output_field: Vector field to store the weighted pressure gradient
+        """
+        for i, j, k in output_field:
+            phi = self.porosity[i, j, k]  # solid volume fraction
+            # Solid phase receives -φ∇pf
+            output_field[i, j, k] = -phi * self.pressure_gradient[i, j, k]
+
+    @ti.kernel
+    def get_fluid_phase_pressure_gradient(self, output_field: ti.template()):
+        """Get porosity-weighted pressure gradient for fluid phase: -(1-φ)∇pf
+        
+        This implements the pressure gradient term in the fluid momentum equation [Eq. 6]:
+        ρ̄f(Dvf/Dt) = ρ̄fg + ∇·Tf + fd - (1-φ)∇pf
+        
+        Args:
+            output_field: Vector field to store the weighted pressure gradient
+        """
+        for i, j, k in output_field:
+            phi = self.porosity[i, j, k]  # solid volume fraction
+            phi_l = 1.0 - phi  # liquid volume fraction
+            # Fluid phase receives -(1-φ)∇pf
+            output_field[i, j, k] = -phi_l * self.pressure_gradient[i, j, k]
+
+    @ti.kernel
+    def apply_two_phase_laplacian(self, input_field: ti.template(), output_field: ti.template()):
+        """Apply porosity-modified Laplacian for two-phase flow
+        
+        For two-phase flow, the pressure equation becomes:
+        ∇·[(1-φ)∇p] = RHS
+        
+        This modifies the standard 7-point stencil to account for variable porosity.
+        The off-diagonal coefficients are weighted by the harmonic mean of
+        (1-φ) at the cell faces.
+        """
+        for i, j, k in output_field:
+            if self.cell_type[i, j, k] == 0:  # Fluid cells only
+                neighbors_sum = 0.0
+                center_coeff = 0.0
+                
+                phi_c = self.porosity[i, j, k]
+                perm_c = 1.0 - phi_c  # liquid fraction at center
+                
+                # -x direction
+                if i > 0 and self.cell_type[i-1, j, k] != 1:
+                    phi_n = self.porosity[i-1, j, k]
+                    perm_n = 1.0 - phi_n
+                    # Harmonic mean for interface permeability
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    if self.cell_type[i-1, j, k] == 0:  # Fluid
+                        neighbors_sum += perm_face * input_field[i-1, j, k]
+                    else:  # Air - use p_air = 0
+                        neighbors_sum += perm_face * self.p_air
+                
+                # +x direction
+                if i < self.nx-1 and self.cell_type[i+1, j, k] != 1:
+                    phi_n = self.porosity[i+1, j, k]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    if self.cell_type[i+1, j, k] == 0:
+                        neighbors_sum += perm_face * input_field[i+1, j, k]
+                    else:
+                        neighbors_sum += perm_face * self.p_air
+                
+                # -y direction
+                if j > 0 and self.cell_type[i, j-1, k] != 1:
+                    phi_n = self.porosity[i, j-1, k]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    if self.cell_type[i, j-1, k] == 0:
+                        neighbors_sum += perm_face * input_field[i, j-1, k]
+                    else:
+                        neighbors_sum += perm_face * self.p_air
+                
+                # +y direction
+                if j < self.ny-1 and self.cell_type[i, j+1, k] != 1:
+                    phi_n = self.porosity[i, j+1, k]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    if self.cell_type[i, j+1, k] == 0:
+                        neighbors_sum += perm_face * input_field[i, j+1, k]
+                    else:
+                        neighbors_sum += perm_face * self.p_air
+                
+                # -z direction
+                if k > 0 and self.cell_type[i, j, k-1] != 1:
+                    phi_n = self.porosity[i, j, k-1]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    if self.cell_type[i, j, k-1] == 0:
+                        neighbors_sum += perm_face * input_field[i, j, k-1]
+                    else:
+                        neighbors_sum += perm_face * self.p_air
+                
+                # +z direction
+                if k < self.nz-1 and self.cell_type[i, j, k+1] != 1:
+                    phi_n = self.porosity[i, j, k+1]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    if self.cell_type[i, j, k+1] == 0:
+                        neighbors_sum += perm_face * input_field[i, j, k+1]
+                    else:
+                        neighbors_sum += perm_face * self.p_air
+                
+                # Negative Laplacian with porosity weighting
+                center = center_coeff * input_field[i, j, k]
+                output_field[i, j, k] = self.inv_dx2 * (center - neighbors_sum)
+            else:
+                output_field[i, j, k] = 0.0
+
+    @ti.kernel
+    def compute_two_phase_diagonal(self):
+        """Compute diagonal entries for two-phase Laplacian matrix
+        
+        The diagonal is modified to account for variable porosity across cell faces.
+        """
+        for i, j, k in self.diag:
+            if self.cell_type[i, j, k] == 0:  # Fluid cells
+                phi_c = self.porosity[i, j, k]
+                perm_c = 1.0 - phi_c  # liquid fraction at center
+                center_coeff = 0.0
+                
+                # Sum contributions from all non-solid neighbors
+                if i > 0 and self.cell_type[i-1, j, k] != 1:
+                    phi_n = self.porosity[i-1, j, k]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    
+                if i < self.nx-1 and self.cell_type[i+1, j, k] != 1:
+                    phi_n = self.porosity[i+1, j, k]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    
+                if j > 0 and self.cell_type[i, j-1, k] != 1:
+                    phi_n = self.porosity[i, j-1, k]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    
+                if j < self.ny-1 and self.cell_type[i, j+1, k] != 1:
+                    phi_n = self.porosity[i, j+1, k]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    
+                if k > 0 and self.cell_type[i, j, k-1] != 1:
+                    phi_n = self.porosity[i, j, k-1]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                    
+                if k < self.nz-1 and self.cell_type[i, j, k+1] != 1:
+                    phi_n = self.porosity[i, j, k+1]
+                    perm_n = 1.0 - phi_n
+                    perm_face = 2.0 * perm_c * perm_n / (perm_c + perm_n + 1e-14)
+                    center_coeff += perm_face
+                
+                # Diagonal for negative Laplacian (positive definite)
+                self.diag[i, j, k] = center_coeff * self.inv_dx2
+                
+                # Ensure non-zero diagonal
+                if self.diag[i, j, k] < 1e-10:
+                    self.diag[i, j, k] = self.inv_dx2
+            else:
+                self.diag[i, j, k] = 1.0  # Non-fluid cells
+
+    def solve_two_phase_pcg(self, div_v_star, max_iter=200, tol=1e-4, rho=1000.0, dt=1e-4):
+        """Solve pressure Poisson equation for two-phase flow using PCG
+        
+        The pressure equation for two-phase flow is:
+        ∇·[(1-φ)∇p] = (ρ/Δt)∇·[(1-φ)v*]
+        
+        Args:
+            div_v_star: Velocity divergence field (weighted by liquid fraction if needed)
+            max_iter: Maximum iterations
+            tol: Convergence tolerance
+            rho: Fluid density (kg/m³)
+            dt: Time step (s)
+        """
+        # Setup RHS
+        self.setup_rhs(div_v_star, rho, dt)
+        
+        # Check for Dirichlet BC
+        has_dirichlet = self.has_air_boundary()
+        if not has_dirichlet:
+            self.remove_null_space(self.rhs)
+        
+        # Setup preconditioner with two-phase diagonal
+        self.compute_two_phase_diagonal()
+        
+        # Compute initial residual using two-phase Laplacian
+        self.apply_two_phase_laplacian(self.pressure, self.Ap)
+        self.compute_initial_residual()
+        
+        # Apply preconditioner
+        self.apply_preconditioner(self.r, self.z)
+        
+        # Initial search direction
+        self.vector_copy(self.z, self.p)
+        
+        # Initial dot product
+        rz_old = self.compute_dot_product(self.r, self.z)
+        
+        # Check immediate convergence
+        initial_residual = ti.sqrt(self.compute_dot_product(self.r, self.r))
+        if initial_residual < 1e-14:
+            print(f"Two-phase PCG converged immediately, residual = {initial_residual:.2e}")
+            # Compute and store pressure gradient
+            self.compute_pressure_gradient()
+            return 0
+        
+        # PCG iteration
+        for iteration in range(max_iter):
+            # Use two-phase Laplacian
+            self.apply_two_phase_laplacian(self.p, self.Ap)
+            
+            pAp = self.compute_dot_product(self.p, self.Ap)
+            if abs(pAp) < 1e-14:
+                print(f"Two-phase PCG breakdown: pAp = {pAp}")
+                break
+            
+            alpha = rz_old / pAp
+            self.vector_axpy(alpha, self.p, self.pressure)
+            self.vector_axpy(-alpha, self.Ap, self.r)
+            
+            residual_norm = ti.sqrt(self.compute_dot_product(self.r, self.r))
+            relative_residual = residual_norm / initial_residual
+            if relative_residual < tol:
+                print(f"Two-phase PCG converged in {iteration+1} iters, rel_res = {relative_residual:.2e}")
+                # Compute and store pressure gradient for phase-weighted contributions
+                self.compute_pressure_gradient()
+                return iteration + 1
+            
+            self.apply_preconditioner(self.r, self.z)
+            rz_new = self.compute_dot_product(self.r, self.z)
+            if abs(rz_old) < 1e-14:
+                print(f"Two-phase PCG breakdown: rz_old = {rz_old}")
+                break
+            
+            beta = rz_new / rz_old
+            self.vector_scale(beta, self.p)
+            self.vector_axpy(1.0, self.z, self.p)
+            rz_old = rz_new
+            
+            if (iteration + 1) % 10 == 0:
+                print(f"  Two-phase PCG iter {iteration+1}: rel_res = {relative_residual:.2e}")
+        
+        final_residual = ti.sqrt(self.compute_dot_product(self.r, self.r))
+        final_relative = final_residual / initial_residual
+        print(f"Two-phase PCG did not converge in {max_iter} iters, rel_res = {final_relative:.2e}")
+        
+        # Still compute pressure gradient for use
+        self.compute_pressure_gradient()
+        return max_iter
+    
+    def get_pressure_gradient_numpy(self):
+        """Export pressure gradient field as numpy array"""
+        return self.pressure_gradient.to_numpy()
+    
+    def get_porosity_numpy(self):
+        """Export porosity field as numpy array"""
+        return self.porosity.to_numpy()

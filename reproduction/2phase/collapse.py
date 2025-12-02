@@ -609,26 +609,67 @@ def P2G():
 
             grid_l_old_v[i, j, k] = grid_lv[i, j, k]
 
-@ti.kernal
+@ti.kernel
 def Phase_Couple():
+    """Compute phase coupling: update porosity on grid and apply shared pore pressure gradient
+    
+    Key equations (from paper):
+    - Solid momentum: ρ̄s(Dvs/Dt) = ρ̄sg + ∇·σ' - fd - φ∇pf     [Eq. 5]
+    - Fluid momentum: ρ̄f(Dvf/Dt) = ρ̄fg + ∇·Tf + fd - (1-φ)∇pf  [Eq. 6]
+    - Drag force: fd = 18φ(1-φ)ηf/d² F̂(vs - vf)               [Eq. 22]
+    """
     for i, j, k in grid_sm:
-        grid_phi_s[i, j, k] = grid_phi_s[i, j, k] * (1 / grid_weight[i, j, k])
-        grid_Re[i, j, k] = (1 - grid_phi_s[i ,j ,k]) * rho_l * s_dia * 1000 * (grid_sv[i, j ,k] - grid_lv[i, j, k]).norm()
-        grid_func[i, j, k] = 10 * grid_phi_s[i ,j ,k] / ((1 - grid_phi_s[i ,j ,k]) ** 2)
-        grid_func[i, j, k] += ((1 - grid_phi_s[i ,j ,k]) ** 2) * (1 + 1.5 * (grid_phi_s[i ,j ,k] ** 0.5))
-        temp_co1 = 0.413 * grid_Re[i, j, k] / (((1 - grid_phi_s[i ,j ,k]) ** 2) * 24)
-        temp_co2 = 1 / (1 - grid_phi_s[i ,j ,k]) + 3 * (1 - grid_phi_s[i ,j ,k]) * grid_phi_s[i ,j ,k] + 8.4 * grid_Re[i, j, k] ** -0.343
-        temp_co3 = 1 + (10 ** (grid_phi_s[i, j, k] * 3)) / (grid_Re[i, j, k] ** (0.5 + 2 * grid_phi_s[i ,j ,k]))
-        grid_func[i, j, k] += temp_co1 * temp_co2 / temp_co3
-        # grid_func[i, j, k] += grid_Re[i, j, k] * (0.03365 * (1 - grid_phi_s[i ,j ,k]) + 0.106 * grid_phi_s[i ,j ,k] * (1 - grid_phi_s[i ,j ,k]))
-        # grid_func[i, j, k] += grid_Re[i, j, k] * (0.0116 / ((1 - grid_phi_s[i ,j ,k]) ** 4))
-        # grid_func[i, j, k] += (grid_phi_s[i ,j ,k] * (6 - 10 * grid_phi_s[i ,j ,k])) / ((1 - grid_phi_s[i ,j ,k]) ** 2)
-        grid_drag[i, j, k] = 18.0 * grid_phi_s[i, j, k] * (1 - grid_phi_s[i, j, k]) * grid_func[i, j, k] / (
-                    s_dia ** 2) * 1e-3 * (grid_sv[i, j, k] - grid_lv[i, j, k])
-        grid_sf[i, j, k] += grid_if_l[i, j, k] * grid_phi_s[i, j, k]
-        grid_sf[i, j, k] += -grid_drag[i, j, k]
-        grid_lf[i, j, k] += grid_if_l[i, j, k] * (1 - grid_phi_s[i, j, k])
-        grid_lf[i, j, k] += grid_drag[i, j, k]
+        # Update porosity (solid volume fraction) on grid with division protection
+        if grid_weight[i, j, k] > tol:
+            grid_phi_s[i, j, k] = grid_phi_s[i, j, k] / grid_weight[i, j, k]
+        else:
+            grid_phi_s[i, j, k] = 0.0
+        
+        # Clamp porosity to valid range [0, 1) to avoid numerical issues
+        grid_phi_s[i, j, k] = ti.max(0.0, ti.min(0.99, grid_phi_s[i, j, k]))
+        
+        # Skip computation if no valid porosity
+        if grid_phi_s[i, j, k] < tol or (1.0 - grid_phi_s[i, j, k]) < tol:
+            continue
+        
+        # Compute Reynolds number for drag force
+        rel_vel = (grid_sv[i, j, k] - grid_lv[i, j, k]).norm()
+        phi_s = grid_phi_s[i, j, k]
+        phi_l = 1.0 - phi_s  # liquid fraction
+        
+        # Avoid division by zero in Reynolds number calculation
+        if phi_l > tol and rel_vel > tol:
+            grid_Re[i, j, k] = phi_l * rho_l * s_dia * 1000.0 * rel_vel
+        else:
+            grid_Re[i, j, k] = tol
+        
+        # Compute drag function F̂ based on Di Felice (1994) and Beetstra et al. (2007)
+        # F̂ = 10φ/(1-φ)² + (1-φ)²(1 + 1.5φ^0.5) + correction terms
+        grid_func[i, j, k] = 10.0 * phi_s / (phi_l ** 2)
+        grid_func[i, j, k] += (phi_l ** 2) * (1.0 + 1.5 * ti.sqrt(phi_s))
+        
+        # Additional correction terms for higher Reynolds numbers
+        Re = ti.max(grid_Re[i, j, k], tol)  # Avoid division by zero
+        temp_co1 = 0.413 * Re / ((phi_l ** 2) * 24.0)
+        temp_co2 = 1.0 / phi_l + 3.0 * phi_l * phi_s + 8.4 * (Re ** (-0.343))
+        temp_co3 = 1.0 + (10.0 ** (phi_s * 3.0)) / (Re ** (0.5 + 2.0 * phi_s))
+        if ti.abs(temp_co3) > tol:
+            grid_func[i, j, k] += temp_co1 * temp_co2 / temp_co3
+        
+        # Compute drag force: fd = 18φ(1-φ)ηf/d² × F̂ × (vs - vf)  [Eq. 22]
+        # Note: 1e-3 converts viscosity unit from mPa·s to Pa·s
+        drag_coeff = 18.0 * phi_s * phi_l * grid_func[i, j, k] / (s_dia ** 2) * 1e-3
+        grid_drag[i, j, k] = drag_coeff * (grid_sv[i, j, k] - grid_lv[i, j, k])
+        
+        # Apply shared pore pressure gradient to both phases
+        # Solid phase: -φ∇pf (pressure gradient weighted by solid fraction)
+        # Fluid phase: -(1-φ)∇pf (pressure gradient weighted by liquid fraction)
+        # Note: grid_if_l contains the pore pressure gradient contribution
+        grid_sf[i, j, k] += grid_if_l[i, j, k] * phi_s  # -φ∇pf to solid
+        grid_sf[i, j, k] -= grid_drag[i, j, k]          # -fd to solid
+        
+        grid_lf[i, j, k] += grid_if_l[i, j, k] * phi_l  # -(1-φ)∇pf to fluid  
+        grid_lf[i, j, k] += grid_drag[i, j, k]          # +fd to fluid (reaction)
 
 
 @ti.kernel
@@ -1028,7 +1069,12 @@ def G2P():
 
         delta_F = ti.Matrix.identity(float, dim) + dt * grad_v
         delta_J = delta_F.determinant()
-        n_s[p] = 1 - ((1 - n_s_0) / delta_J)
+        # Update porosity based on volumetric strain: n = 1 - (1-n0)/J
+        # This ensures porosity evolves with deformation while maintaining mass conservation
+        if delta_J > tol:
+            n_s[p] = 1.0 - ((1.0 - n_s_0[p]) / delta_J)
+            # Clamp porosity to valid range [0, 1)
+            n_s[p] = ti.max(0.0, ti.min(0.99, n_s[p]))
         # Modified F-bar (consider gasification)
         this_particle_new_J_no_bar = sand_material.get_J_no_bar(p)
         this_particle_new_volume = p_vol * this_particle_new_J_no_bar
