@@ -67,10 +67,10 @@ def run_ceccato_simulation():
     domain_height = 0.25  # Total domain height (m)
     domain_width = W0     # Domain width (m)
     
-    # Numerical parameters
-    dx = 0.008           # Grid spacing (m) - coarser for faster testing
-    dt = 5e-5            # Time step (s)
-    total_time = 0.15    # Total simulation time (s) ≈ 1.4 * t_ref (quick test)
+    # Numerical parameters - more conservative for stability
+    dx = 0.005           # Grid spacing (m) - finer for stability
+    dt = 1e-5            # Time step (s) - smaller for CFL stability
+    total_time = 0.15    # Total simulation time (s) ≈ 1.4 * t_ref
     
     # Grid dimensions
     nx = int(domain_length / dx) + 4
@@ -114,7 +114,7 @@ def run_ceccato_simulation():
         g=g,
         dt=dt,
         max_particles=max_particles,
-        flip_ratio=0.95
+        flip_ratio=0.90  # Reduced FLIP ratio for more numerical damping
     )
     
     # =====================================================

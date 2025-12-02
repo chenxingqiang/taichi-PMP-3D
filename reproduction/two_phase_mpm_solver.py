@@ -342,11 +342,17 @@ class TwoPhaseMPMSolver:
                     # Solid volume fraction
                     self.grid_phi_s[idx] += weight * self.phi_s[p]
                     
-                    # Internal force
+                    # Internal force - gradient of B-spline weights
+                    # Derivatives: w'[0] = -(1.5-fx), w'[1] = -2(fx-1), w'[2] = (fx-0.5)
+                    dw_dx = ti.Vector([
+                        (-(1.5 - fx[0]) if i == 0 else (-2*(fx[0]-1) if i == 1 else (fx[0]-0.5))),
+                        (-(1.5 - fx[1]) if j == 0 else (-2*(fx[1]-1) if j == 1 else (fx[1]-0.5))),
+                        (-(1.5 - fx[2]) if k == 0 else (-2*(fx[2]-1) if k == 1 else (fx[2]-0.5)))
+                    ])
                     grad_w = ti.Vector([
-                        (w[i][0] if i == 0 else (-2*(fx[0]-1) if i == 1 else (fx[0]-0.5))) * w[j][1] * w[k][2],
-                        w[i][0] * (w[j][1] if j == 0 else (-2*(fx[1]-1) if j == 1 else (fx[1]-0.5))) * w[k][2],
-                        w[i][0] * w[j][1] * (w[k][2] if k == 0 else (-2*(fx[2]-1) if k == 1 else (fx[2]-0.5)))
+                        dw_dx[0] * w[j][1] * w[k][2],
+                        w[i][0] * dw_dx[1] * w[k][2],
+                        w[i][0] * w[j][1] * dw_dx[2]
                     ]) * self.inv_dx
                     
                     self.grid_f_s[idx] -= self.V_s[p] * stress @ grad_w
@@ -421,19 +427,50 @@ class TwoPhaseMPMSolver:
                 acc_f = gravity_factor * self.g + drag_acc
                 self.grid_v_f[i, j, k] += self.dt * acc_f
             
-            # Boundary conditions
+            # Limit grid velocity to prevent explosion
+            max_grid_vel = 20.0  # m/s
+            for d in ti.static(range(3)):
+                self.grid_v_s[i, j, k][d] = ti.max(ti.min(self.grid_v_s[i, j, k][d], max_grid_vel), -max_grid_vel)
+                self.grid_v_f[i, j, k][d] = ti.max(ti.min(self.grid_v_f[i, j, k][d], max_grid_vel), -max_grid_vel)
+            
+            # Boundary conditions with friction
+            friction_coeff = 0.4  # Bottom friction
+            
+            # Left boundary (x = 0)
             if i < 3 and self.grid_v_s[i, j, k][0] < 0:
                 self.grid_v_s[i, j, k][0] = 0
                 self.grid_v_f[i, j, k][0] = 0
+            # Right boundary
             if i >= self.nx - 3 and self.grid_v_s[i, j, k][0] > 0:
                 self.grid_v_s[i, j, k][0] = 0
                 self.grid_v_f[i, j, k][0] = 0
+            
+            # Bottom boundary with Coulomb friction
             if j < 3 and self.grid_v_s[i, j, k][1] < 0:
-                self.grid_v_s[i, j, k][1] = 0
+                v_n = -self.grid_v_s[i, j, k][1]  # Normal velocity (into wall)
+                v_t_x = self.grid_v_s[i, j, k][0]
+                v_t_z = self.grid_v_s[i, j, k][2]
+                v_t_mag = ti.sqrt(v_t_x**2 + v_t_z**2 + 1e-10)
+                
+                # Apply Coulomb friction
+                friction_force = friction_coeff * v_n
+                if v_t_mag > friction_force:
+                    scale = (v_t_mag - friction_force) / v_t_mag
+                    self.grid_v_s[i, j, k][0] *= scale
+                    self.grid_v_s[i, j, k][2] *= scale
+                else:
+                    self.grid_v_s[i, j, k][0] = 0
+                    self.grid_v_s[i, j, k][2] = 0
+                
+                self.grid_v_s[i, j, k][1] = 0  # No penetration
                 self.grid_v_f[i, j, k][1] = 0
+            
+            # Top boundary
             if j >= self.ny - 3 and self.grid_v_s[i, j, k][1] > 0:
                 self.grid_v_s[i, j, k][1] = 0
                 self.grid_v_f[i, j, k][1] = 0
+            
+            # Front/back boundaries
             if k < 3 and self.grid_v_s[i, j, k][2] < 0:
                 self.grid_v_s[i, j, k][2] = 0
                 self.grid_v_f[i, j, k][2] = 0
@@ -488,7 +525,7 @@ class TwoPhaseMPMSolver:
             
             # Limit velocity to avoid explosion
             vel_mag = new_v.norm()
-            max_vel = 50.0  # 50 m/s limit
+            max_vel = 15.0  # Reduced for column collapse stability
             if vel_mag > max_vel:
                 new_v = new_v * (max_vel / vel_mag)
             
@@ -534,7 +571,7 @@ class TwoPhaseMPMSolver:
             
             # Limit velocity to avoid explosion
             vel_mag = new_v.norm()
-            max_vel = 50.0  # 50 m/s limit
+            max_vel = 15.0  # Reduced for column collapse stability
             if vel_mag > max_vel:
                 new_v = new_v * (max_vel / vel_mag)
             
