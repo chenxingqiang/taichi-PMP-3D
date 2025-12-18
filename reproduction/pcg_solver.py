@@ -69,6 +69,29 @@ class PCGSolver:
         # Ghost pressure values
         self.p_air = 0.0  # Atmospheric pressure (gauge pressure = 0)
         
+        # Ghost Fluid Method (GFM) fields for accurate free surface BCs
+        # Theta values: θ = |φ_fluid| / (|φ_fluid| + |φ_air|) for interface position
+        # These represent the fraction of distance from fluid cell center to interface
+        self.theta_xp = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # θ in +x direction
+        self.theta_xm = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # θ in -x direction
+        self.theta_yp = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # θ in +y direction
+        self.theta_ym = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # θ in -y direction
+        self.theta_zp = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # θ in +z direction
+        self.theta_zm = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # θ in -z direction
+        
+        # Face-center pressure gradients for node interpolation
+        self.grad_p_face_x = ti.field(dtype=ti.f64, shape=(nx+1, ny, nz))  # ∂p/∂x at x-faces
+        self.grad_p_face_y = ti.field(dtype=ti.f64, shape=(nx, ny+1, nz))  # ∂p/∂y at y-faces
+        self.grad_p_face_z = ti.field(dtype=ti.f64, shape=(nx, ny, nz+1))  # ∂p/∂z at z-faces
+        
+        # Beta weights for face-center validity (1 if at least one adjacent cell is fluid)
+        self.beta_face_x = ti.field(dtype=ti.f64, shape=(nx+1, ny, nz))
+        self.beta_face_y = ti.field(dtype=ti.f64, shape=(nx, ny+1, nz))
+        self.beta_face_z = ti.field(dtype=ti.f64, shape=(nx, ny, nz+1))
+        
+        # Node-based pressure gradient (for velocity update)
+        self.grad_p_node = ti.Vector.field(3, dtype=ti.f64, shape=(nx+1, ny+1, nz+1))
+        
         # Preconditioner storage (for MIC and SSOR)
         self.diag = ti.field(dtype=ti.f64, shape=(nx, ny, nz))      # Diagonal elements
         self.mic_diag = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # MIC modified diagonal
@@ -89,47 +112,77 @@ class PCGSolver:
 
     @ti.kernel
     def compute_diagonal(self):
-        """Compute diagonal entries of the negative Laplacian matrix (-∇²)
+        """Compute diagonal entries of the negative Laplacian matrix (-∇²) with GFM
         
-        Following Bridson's approach (Figure 5.4):
+        Following Bridson's approach (Figure 5.4) with Ghost Fluid Method:
         - For SOLID cell boundary: delete mention of that p AND reduce the coefficient
-          in front of p_{i,j} by one
-        - The coefficient in front of p_{i,j} = number of NON-SOLID grid cell neighbors
+        - For AIR cell boundary: use modified coefficient -(1 + 1/θ) instead of -2
         
-        We use -∇² instead of ∇² to make the matrix positive semi-definite,
-        which is required for PCG convergence.
+        The coefficient in front of p_{i,j} for the negative Laplacian:
+        - For fluid neighbor: +1
+        - For air neighbor (GFM): +(1 + 1/θ) where θ is the interface position
+        - For solid neighbor: 0 (Neumann BC)
         
-        For GFM (Ghost Fluid Method), we count all non-solid neighbors (fluid + air).
-        The diagonal is +n_neighbors * inv_dx² (positive, for -∇²).
+        From paper Eq. (41):
+        (∂²p/∂x²)_{i,j} = [(1/θ)p^{fs} + p_{i-1,j} - (1 + 1/θ)p_{i,j}] / Δx²
+        
+        For negative Laplacian: coefficient = (1 + 1/θ) for air direction
         """
         for i, j, k in self.diag:
             if self.cell_type[i, j, k] == 0:  # Fluid cells
-                # Count all non-solid neighbors (fluid + air)
-                # This implements Bridson's rule: diagonal = number of non-solid neighbors
-                n_neighbors = 0.0
+                # Sum coefficients with GFM correction for air boundaries
+                coeff_sum = 0.0
                 
                 # Check -x direction
                 if i > 0 and self.cell_type[i-1, j, k] != 1:  # Not solid
-                    n_neighbors += 1.0
+                    if self.cell_type[i-1, j, k] == 2:  # Air - use GFM
+                        theta = self.theta_xm[i, j, k]
+                        coeff_sum += 1.0 + 1.0 / theta  # (1 + 1/θ)
+                    else:  # Fluid
+                        coeff_sum += 1.0
+                
                 # Check +x direction
                 if i < self.nx-1 and self.cell_type[i+1, j, k] != 1:  # Not solid
-                    n_neighbors += 1.0
+                    if self.cell_type[i+1, j, k] == 2:  # Air - use GFM
+                        theta = self.theta_xp[i, j, k]
+                        coeff_sum += 1.0 + 1.0 / theta
+                    else:  # Fluid
+                        coeff_sum += 1.0
+                
                 # Check -y direction
                 if j > 0 and self.cell_type[i, j-1, k] != 1:  # Not solid
-                    n_neighbors += 1.0
+                    if self.cell_type[i, j-1, k] == 2:  # Air - use GFM
+                        theta = self.theta_ym[i, j, k]
+                        coeff_sum += 1.0 + 1.0 / theta
+                    else:  # Fluid
+                        coeff_sum += 1.0
+                
                 # Check +y direction
                 if j < self.ny-1 and self.cell_type[i, j+1, k] != 1:  # Not solid
-                    n_neighbors += 1.0
+                    if self.cell_type[i, j+1, k] == 2:  # Air - use GFM
+                        theta = self.theta_yp[i, j, k]
+                        coeff_sum += 1.0 + 1.0 / theta
+                    else:  # Fluid
+                        coeff_sum += 1.0
+                
                 # Check -z direction
                 if k > 0 and self.cell_type[i, j, k-1] != 1:  # Not solid
-                    n_neighbors += 1.0
+                    if self.cell_type[i, j, k-1] == 2:  # Air - use GFM
+                        theta = self.theta_zm[i, j, k]
+                        coeff_sum += 1.0 + 1.0 / theta
+                    else:  # Fluid
+                        coeff_sum += 1.0
+                
                 # Check +z direction
                 if k < self.nz-1 and self.cell_type[i, j, k+1] != 1:  # Not solid
-                    n_neighbors += 1.0
+                    if self.cell_type[i, j, k+1] == 2:  # Air - use GFM
+                        theta = self.theta_zp[i, j, k]
+                        coeff_sum += 1.0 + 1.0 / theta
+                    else:  # Fluid
+                        coeff_sum += 1.0
                 
                 # Diagonal for negative Laplacian -∇² (positive definite)
-                # coefficient = n_non_solid_neighbors / dx²
-                self.diag[i, j, k] = n_neighbors * self.inv_dx2  # Positive!
+                self.diag[i, j, k] = coeff_sum * self.inv_dx2
                 
                 # Ensure non-zero diagonal for numerical stability
                 if self.diag[i, j, k] < 1e-10:
@@ -465,71 +518,105 @@ class PCGSolver:
 
     @ti.kernel
     def apply_laplacian(self, input_field: ti.template(), output_field: ti.template()):
-        """Apply negative Laplacian (-∇²) with simplified Ghost Fluid Method
+        """Apply negative Laplacian (-∇²) with Ghost Fluid Method (GFM)
         
         We compute -∇² instead of ∇² to make the matrix positive semi-definite.
-        -∇²p = n_neighbors * p_center - sum(p_neighbors)
         
-        At free surface boundaries (fluid-air), we use p_air = 0 (Dirichlet BC).
-        This keeps the matrix linear and symmetric.
+        From paper Eq. (40-41), at fluid-air interface in +x direction:
+        (∂²p/∂x²)_{i,j} = [p^{Gfix}_{i+1,j} + p_{i-1,j} - 2p_{i,j}] / Δx²
+        
+        where ghost pressure: p^{Gfix}_{i+1,j} = [p^{fs} + (θ-1)p_{i,j}] / θ
+        
+        Substituting and simplifying:
+        (∂²p/∂x²)_{i,j} = [(1/θ)p^{fs} + p_{i-1,j} - (1 + 1/θ)p_{i,j}] / Δx²
+        
+        For negative Laplacian at air boundary:
+        - Center coefficient: (1 + 1/θ) instead of 1
+        - Neighbor contribution: (1/θ) * p^{fs} instead of p_neighbor
+        
+        With p^{fs} = p_air + σ_fs (surface tension), usually p_air = 0.
         """
         for i, j, k in output_field:
             if self.cell_type[i, j, k] == 0:  # Fluid cells only
-                # Count actual non-solid neighbors and sum their pressure contributions
+                # Sum of center coefficients and neighbor pressure contributions
+                center_coeff = 0.0
                 neighbors_sum = 0.0
-                n_neighbors = 0
+                
+                # Surface pressure (p_air + surface tension effect)
+                p_fs = self.p_air
+                if self.surface_tension[None] > 0:
+                    # Get curvature at cell center (interpolated)
+                    kappa = 0.125 * (
+                        self.curvature[i, j, k] + self.curvature[i+1, j, k] +
+                        self.curvature[i, j+1, k] + self.curvature[i+1, j+1, k] +
+                        self.curvature[i, j, k+1] + self.curvature[i+1, j, k+1] +
+                        self.curvature[i, j+1, k+1] + self.curvature[i+1, j+1, k+1]
+                    )
+                    p_fs = self.p_air + self.surface_tension[None] * kappa
                 
                 # -x direction
                 if i > 0 and self.cell_type[i-1, j, k] != 1:  # Not solid
-                    n_neighbors += 1
-                    if self.cell_type[i-1, j, k] == 0:  # Fluid
+                    if self.cell_type[i-1, j, k] == 2:  # Air - use GFM
+                        theta = self.theta_xm[i, j, k]
+                        center_coeff += 1.0 + 1.0 / theta  # Modified center coefficient
+                        neighbors_sum += (1.0 / theta) * p_fs  # Ghost pressure contribution
+                    else:  # Fluid neighbor
+                        center_coeff += 1.0
                         neighbors_sum += input_field[i-1, j, k]
-                    else:  # Air - use p_air = 0
-                        neighbors_sum += self.p_air
                 
                 # +x direction
                 if i < self.nx-1 and self.cell_type[i+1, j, k] != 1:  # Not solid
-                    n_neighbors += 1
-                    if self.cell_type[i+1, j, k] == 0:  # Fluid
+                    if self.cell_type[i+1, j, k] == 2:  # Air - use GFM
+                        theta = self.theta_xp[i, j, k]
+                        center_coeff += 1.0 + 1.0 / theta
+                        neighbors_sum += (1.0 / theta) * p_fs
+                    else:  # Fluid neighbor
+                        center_coeff += 1.0
                         neighbors_sum += input_field[i+1, j, k]
-                    else:  # Air - use p_air = 0
-                        neighbors_sum += self.p_air
                 
                 # -y direction
                 if j > 0 and self.cell_type[i, j-1, k] != 1:  # Not solid
-                    n_neighbors += 1
-                    if self.cell_type[i, j-1, k] == 0:  # Fluid
+                    if self.cell_type[i, j-1, k] == 2:  # Air - use GFM
+                        theta = self.theta_ym[i, j, k]
+                        center_coeff += 1.0 + 1.0 / theta
+                        neighbors_sum += (1.0 / theta) * p_fs
+                    else:  # Fluid neighbor
+                        center_coeff += 1.0
                         neighbors_sum += input_field[i, j-1, k]
-                    else:  # Air - use p_air = 0
-                        neighbors_sum += self.p_air
                 
                 # +y direction
                 if j < self.ny-1 and self.cell_type[i, j+1, k] != 1:  # Not solid
-                    n_neighbors += 1
-                    if self.cell_type[i, j+1, k] == 0:  # Fluid
+                    if self.cell_type[i, j+1, k] == 2:  # Air - use GFM
+                        theta = self.theta_yp[i, j, k]
+                        center_coeff += 1.0 + 1.0 / theta
+                        neighbors_sum += (1.0 / theta) * p_fs
+                    else:  # Fluid neighbor
+                        center_coeff += 1.0
                         neighbors_sum += input_field[i, j+1, k]
-                    else:  # Air - use p_air = 0
-                        neighbors_sum += self.p_air
                 
                 # -z direction
                 if k > 0 and self.cell_type[i, j, k-1] != 1:  # Not solid
-                    n_neighbors += 1
-                    if self.cell_type[i, j, k-1] == 0:  # Fluid
+                    if self.cell_type[i, j, k-1] == 2:  # Air - use GFM
+                        theta = self.theta_zm[i, j, k]
+                        center_coeff += 1.0 + 1.0 / theta
+                        neighbors_sum += (1.0 / theta) * p_fs
+                    else:  # Fluid neighbor
+                        center_coeff += 1.0
                         neighbors_sum += input_field[i, j, k-1]
-                    else:  # Air - use p_air = 0
-                        neighbors_sum += self.p_air
                 
                 # +z direction
                 if k < self.nz-1 and self.cell_type[i, j, k+1] != 1:  # Not solid
-                    n_neighbors += 1
-                    if self.cell_type[i, j, k+1] == 0:  # Fluid
+                    if self.cell_type[i, j, k+1] == 2:  # Air - use GFM
+                        theta = self.theta_zp[i, j, k]
+                        center_coeff += 1.0 + 1.0 / theta
+                        neighbors_sum += (1.0 / theta) * p_fs
+                    else:  # Fluid neighbor
+                        center_coeff += 1.0
                         neighbors_sum += input_field[i, j, k+1]
-                    else:  # Air - use p_air = 0
-                        neighbors_sum += self.p_air
                 
-                # Negative Laplacian: +n_neighbors * p_center - sum(p_neighbors)
-                # This is consistent with self.diag[i,j,k] = +n_neighbors * inv_dx²
-                center = float(n_neighbors) * input_field[i, j, k]
+                # Negative Laplacian with GFM: +center_coeff * p_center - sum(neighbors)
+                # This is consistent with self.diag[i,j,k] = center_coeff * inv_dx²
+                center = center_coeff * input_field[i, j, k]
                 output_field[i, j, k] = self.inv_dx2 * (center - neighbors_sum)
             else:
                 output_field[i, j, k] = 0.0
@@ -651,8 +738,8 @@ class PCGSolver:
     # ==================== Main Solve Method ====================
 
     def solve_pcg(self, div_v_star, max_iter=200, tol=1e-4, rho=1000.0, dt=1e-4,
-                  v_star=None, v_solid=None, use_solid_bc=False):
-        """Solve pressure Poisson equation using PCG
+                  v_star=None, v_solid=None, use_solid_bc=False, phi=None):
+        """Solve pressure Poisson equation using PCG with Ghost Fluid Method
         
         Args:
             div_v_star: Velocity divergence field
@@ -663,7 +750,14 @@ class PCGSolver:
             v_star: Intermediate velocity field (required if use_solid_bc=True)
             v_solid: Solid velocity field (optional, defaults to zero/static)
             use_solid_bc: Whether to use solid boundary velocity correction (Bridson 5.4)
+            phi: Level set field for computing theta values (optional, uses stored level_set if None)
         """
+        # Compute GFM theta values from level set (for accurate interface treatment)
+        if phi is not None:
+            self.compute_theta_gfm(phi)
+        else:
+            self.compute_theta_gfm(self.level_set)
+        
         # Setup RHS based on boundary condition mode
         if use_solid_bc and v_star is not None:
             if v_solid is not None:
@@ -684,7 +778,7 @@ class PCGSolver:
             # Only remove null space for pure Neumann BC (enclosed domain)
             self.remove_null_space(self.rhs)
         
-        # Setup preconditioner (for MIC/SSOR)
+        # Setup preconditioner (for MIC/SSOR) - now uses GFM theta in diagonal
         self.setup_preconditioner()
 
         # Compute initial residual: r = b - Ap
@@ -704,6 +798,8 @@ class PCGSolver:
         initial_residual = ti.sqrt(self.compute_dot_product(self.r, self.r))
         if initial_residual < 1e-14:
             print(f"PCG converged immediately, residual = {initial_residual:.2e}")
+            # Compute node-based pressure gradient with GFM
+            self.compute_node_gradient_gfm()
             return 0
 
         # PCG iteration with relative residual tolerance
@@ -733,6 +829,8 @@ class PCGSolver:
             relative_residual = residual_norm / initial_residual
             if relative_residual < tol:
                 print(f"PCG converged in {iteration+1} iterations, rel_residual = {relative_residual:.2e}")
+                # Compute node-based pressure gradient with GFM
+                self.compute_node_gradient_gfm()
                 return iteration + 1
 
             # Apply preconditioner: z = M^{-1} * r
@@ -760,6 +858,8 @@ class PCGSolver:
         final_residual = ti.sqrt(self.compute_dot_product(self.r, self.r))
         final_relative = final_residual / initial_residual
         print(f"PCG did not converge in {max_iter} iterations, rel_residual = {final_relative:.2e}")
+        # Still compute node-based pressure gradient for use even if not converged
+        self.compute_node_gradient_gfm()
         return max_iter
 
     # ==================== Utility Methods ====================
@@ -778,6 +878,101 @@ class PCGSolver:
                 self.cell_type[i, j, k] = 0  # Fluid
             else:
                 self.cell_type[i, j, k] = 2  # Air
+    
+    @ti.kernel
+    def compute_theta_gfm(self, phi: ti.template()):
+        """Compute theta values for Ghost Fluid Method (GFM)
+        
+        For each fluid-air interface, compute:
+        θ = |φ_fluid| / (|φ_fluid| + |φ_air|)
+        
+        This represents the fraction of distance from fluid cell center to interface.
+        
+        From paper Eq. (41): The coefficient becomes -(1 + 1/θ) instead of -2.
+        """
+        for i, j, k in self.cell_type:
+            # Get level set value at cell center (interpolated from nodes)
+            phi_c = 0.125 * (
+                phi[i, j, k] + phi[i+1, j, k] + phi[i, j+1, k] + phi[i+1, j+1, k] +
+                phi[i, j, k+1] + phi[i+1, j, k+1] + phi[i, j+1, k+1] + phi[i+1, j+1, k+1]
+            )
+            
+            # Initialize theta values to 1.0 (no interface = standard coefficient)
+            self.theta_xp[i, j, k] = 1.0
+            self.theta_xm[i, j, k] = 1.0
+            self.theta_yp[i, j, k] = 1.0
+            self.theta_ym[i, j, k] = 1.0
+            self.theta_zp[i, j, k] = 1.0
+            self.theta_zm[i, j, k] = 1.0
+            
+            # Only compute theta for fluid cells at interfaces
+            if self.cell_type[i, j, k] == 0:  # Fluid cell
+                # +x direction: check if neighbor is air
+                if i < self.nx - 1 and self.cell_type[i+1, j, k] == 2:
+                    phi_n = 0.125 * (
+                        phi[i+1, j, k] + phi[i+2, j, k] + phi[i+1, j+1, k] + phi[i+2, j+1, k] +
+                        phi[i+1, j, k+1] + phi[i+2, j, k+1] + phi[i+1, j+1, k+1] + phi[i+2, j+1, k+1]
+                    )
+                    # θ = |φ_fluid| / (|φ_fluid| + |φ_air|)
+                    phi_abs_c = ti.abs(phi_c)
+                    phi_abs_n = ti.abs(phi_n)
+                    theta = phi_abs_c / (phi_abs_c + phi_abs_n + 1e-14)
+                    self.theta_xp[i, j, k] = ti.max(theta, 0.01)  # Clamp to avoid singularity
+                
+                # -x direction
+                if i > 0 and self.cell_type[i-1, j, k] == 2:
+                    phi_n = 0.125 * (
+                        phi[i-1, j, k] + phi[i, j, k] + phi[i-1, j+1, k] + phi[i, j+1, k] +
+                        phi[i-1, j, k+1] + phi[i, j, k+1] + phi[i-1, j+1, k+1] + phi[i, j+1, k+1]
+                    )
+                    phi_abs_c = ti.abs(phi_c)
+                    phi_abs_n = ti.abs(phi_n)
+                    theta = phi_abs_c / (phi_abs_c + phi_abs_n + 1e-14)
+                    self.theta_xm[i, j, k] = ti.max(theta, 0.01)
+                
+                # +y direction
+                if j < self.ny - 1 and self.cell_type[i, j+1, k] == 2:
+                    phi_n = 0.125 * (
+                        phi[i, j+1, k] + phi[i+1, j+1, k] + phi[i, j+2, k] + phi[i+1, j+2, k] +
+                        phi[i, j+1, k+1] + phi[i+1, j+1, k+1] + phi[i, j+2, k+1] + phi[i+1, j+2, k+1]
+                    )
+                    phi_abs_c = ti.abs(phi_c)
+                    phi_abs_n = ti.abs(phi_n)
+                    theta = phi_abs_c / (phi_abs_c + phi_abs_n + 1e-14)
+                    self.theta_yp[i, j, k] = ti.max(theta, 0.01)
+                
+                # -y direction
+                if j > 0 and self.cell_type[i, j-1, k] == 2:
+                    phi_n = 0.125 * (
+                        phi[i, j-1, k] + phi[i+1, j-1, k] + phi[i, j, k] + phi[i+1, j, k] +
+                        phi[i, j-1, k+1] + phi[i+1, j-1, k+1] + phi[i, j, k+1] + phi[i+1, j, k+1]
+                    )
+                    phi_abs_c = ti.abs(phi_c)
+                    phi_abs_n = ti.abs(phi_n)
+                    theta = phi_abs_c / (phi_abs_c + phi_abs_n + 1e-14)
+                    self.theta_ym[i, j, k] = ti.max(theta, 0.01)
+                
+                # +z direction
+                if k < self.nz - 1 and self.cell_type[i, j, k+1] == 2:
+                    phi_n = 0.125 * (
+                        phi[i, j, k+1] + phi[i+1, j, k+1] + phi[i, j+1, k+1] + phi[i+1, j+1, k+1] +
+                        phi[i, j, k+2] + phi[i+1, j, k+2] + phi[i, j+1, k+2] + phi[i+1, j+1, k+2]
+                    )
+                    phi_abs_c = ti.abs(phi_c)
+                    phi_abs_n = ti.abs(phi_n)
+                    theta = phi_abs_c / (phi_abs_c + phi_abs_n + 1e-14)
+                    self.theta_zp[i, j, k] = ti.max(theta, 0.01)
+                
+                # -z direction
+                if k > 0 and self.cell_type[i, j, k-1] == 2:
+                    phi_n = 0.125 * (
+                        phi[i, j, k-1] + phi[i+1, j, k-1] + phi[i, j+1, k-1] + phi[i+1, j+1, k-1] +
+                        phi[i, j, k] + phi[i+1, j, k] + phi[i, j+1, k] + phi[i+1, j+1, k]
+                    )
+                    phi_abs_c = ti.abs(phi_c)
+                    phi_abs_n = ti.abs(phi_n)
+                    theta = phi_abs_c / (phi_abs_c + phi_abs_n + 1e-14)
+                    self.theta_zm[i, j, k] = ti.max(theta, 0.01)
 
     @ti.kernel
     def update_level_set(self, phi: ti.template()):
@@ -801,6 +996,213 @@ class PCGSolver:
     def get_pressure_numpy(self):
         """Export pressure field as numpy array"""
         return self.pressure.to_numpy()
+
+    # ==================== Node-Based Pressure Gradient (GFM) ====================
+    
+    @ti.kernel
+    def compute_face_center_gradients_gfm(self):
+        """Compute pressure gradients at face centers with Ghost Fluid Method
+        
+        From paper Eq. (44):
+        (∂p/∂x)_{i+1/2,j} = (p_{i+1,j} - p_{i,j}) / Δx
+        
+        At free surface, replace air cell pressure with ghost pressure:
+        p^{Gfix}_{i+1,j} = [p^{fs} + (θ-1)p_{i,j}] / θ
+        
+        The gradient becomes:
+        (∂p/∂x)_{i+1/2,j} = (p^{fs} - p_{i,j}) / (θ * Δx)
+        """
+        inv_dx = 1.0 / self.dx
+        
+        # Surface pressure (p_air + surface tension)
+        p_fs = self.p_air
+        
+        # X-face gradients (∂p/∂x at x-faces)
+        for i, j, k in self.grad_p_face_x:
+            self.grad_p_face_x[i, j, k] = 0.0
+            self.beta_face_x[i, j, k] = 0.0
+            
+            # Face is between cells (i-1, j, k) and (i, j, k)
+            i_left = i - 1
+            i_right = i
+            
+            # Check bounds and cell types
+            left_valid = (i_left >= 0 and i_left < self.nx)
+            right_valid = (i_right >= 0 and i_right < self.nx)
+            
+            if left_valid and right_valid:
+                left_type = self.cell_type[i_left, j, k]
+                right_type = self.cell_type[i_right, j, k]
+                
+                # β = 1 if at least one adjacent cell is fluid
+                if left_type == 0 or right_type == 0:
+                    self.beta_face_x[i, j, k] = 1.0
+                    
+                    # Compute gradient based on cell types
+                    if left_type == 0 and right_type == 0:
+                        # Both fluid cells
+                        self.grad_p_face_x[i, j, k] = (self.pressure[i_right, j, k] - self.pressure[i_left, j, k]) * inv_dx
+                    elif left_type == 0 and right_type == 2:
+                        # Left is fluid, right is air - use GFM
+                        theta = self.theta_xp[i_left, j, k]
+                        # Ghost pressure approach: gradient = (p_fs - p_fluid) / (θ * Δx)
+                        self.grad_p_face_x[i, j, k] = (p_fs - self.pressure[i_left, j, k]) / (theta * self.dx)
+                    elif left_type == 2 and right_type == 0:
+                        # Left is air, right is fluid - use GFM
+                        theta = self.theta_xm[i_right, j, k]
+                        # Ghost pressure approach
+                        self.grad_p_face_x[i, j, k] = (self.pressure[i_right, j, k] - p_fs) / (theta * self.dx)
+                    # If both are air or involve solid, gradient is 0
+        
+        # Y-face gradients (∂p/∂y at y-faces)
+        for i, j, k in self.grad_p_face_y:
+            self.grad_p_face_y[i, j, k] = 0.0
+            self.beta_face_y[i, j, k] = 0.0
+            
+            j_bottom = j - 1
+            j_top = j
+            
+            bottom_valid = (j_bottom >= 0 and j_bottom < self.ny)
+            top_valid = (j_top >= 0 and j_top < self.ny)
+            
+            if bottom_valid and top_valid:
+                bottom_type = self.cell_type[i, j_bottom, k]
+                top_type = self.cell_type[i, j_top, k]
+                
+                if bottom_type == 0 or top_type == 0:
+                    self.beta_face_y[i, j, k] = 1.0
+                    
+                    if bottom_type == 0 and top_type == 0:
+                        self.grad_p_face_y[i, j, k] = (self.pressure[i, j_top, k] - self.pressure[i, j_bottom, k]) * inv_dx
+                    elif bottom_type == 0 and top_type == 2:
+                        theta = self.theta_yp[i, j_bottom, k]
+                        self.grad_p_face_y[i, j, k] = (p_fs - self.pressure[i, j_bottom, k]) / (theta * self.dx)
+                    elif bottom_type == 2 and top_type == 0:
+                        theta = self.theta_ym[i, j_top, k]
+                        self.grad_p_face_y[i, j, k] = (self.pressure[i, j_top, k] - p_fs) / (theta * self.dx)
+        
+        # Z-face gradients (∂p/∂z at z-faces)
+        for i, j, k in self.grad_p_face_z:
+            self.grad_p_face_z[i, j, k] = 0.0
+            self.beta_face_z[i, j, k] = 0.0
+            
+            k_back = k - 1
+            k_front = k
+            
+            back_valid = (k_back >= 0 and k_back < self.nz)
+            front_valid = (k_front >= 0 and k_front < self.nz)
+            
+            if back_valid and front_valid:
+                back_type = self.cell_type[i, j, k_back]
+                front_type = self.cell_type[i, j, k_front]
+                
+                if back_type == 0 or front_type == 0:
+                    self.beta_face_z[i, j, k] = 1.0
+                    
+                    if back_type == 0 and front_type == 0:
+                        self.grad_p_face_z[i, j, k] = (self.pressure[i, j, k_front] - self.pressure[i, j, k_back]) * inv_dx
+                    elif back_type == 0 and front_type == 2:
+                        theta = self.theta_zp[i, j, k_back]
+                        self.grad_p_face_z[i, j, k] = (p_fs - self.pressure[i, j, k_back]) / (theta * self.dx)
+                    elif back_type == 2 and front_type == 0:
+                        theta = self.theta_zm[i, j, k_front]
+                        self.grad_p_face_z[i, j, k] = (self.pressure[i, j, k_front] - p_fs) / (theta * self.dx)
+
+    @ti.kernel
+    def compute_node_pressure_gradient_gfm(self):
+        """Compute pressure gradient at grid nodes using weighted average of face-center gradients
+        
+        From paper Eq. (47-51), for 3D:
+        (∂p/∂x)_{i+1/2,j+1/2,k+1/2} = sum of weighted face-center gradients
+        
+        Weights are computed from β values:
+        w_{face} = β_{face} / sum(β_{all_faces})
+        
+        where β = 1 if at least one adjacent cell of the face is in fluid domain.
+        
+        This handles cases near free surface where some face centers have no valid gradient.
+        """
+        for i, j, k in self.grad_p_node:
+            grad_x = 0.0
+            grad_y = 0.0
+            grad_z = 0.0
+            
+            # X-gradient: average over 4 x-faces around the node
+            # Faces at (i, j, k), (i, j-1, k), (i, j, k-1), (i, j-1, k-1)
+            beta_sum_x = 0.0
+            grad_sum_x = 0.0
+            
+            if j < self.ny and k < self.nz and i <= self.nx:
+                beta_sum_x += self.beta_face_x[i, j, k]
+                grad_sum_x += self.beta_face_x[i, j, k] * self.grad_p_face_x[i, j, k]
+            if j > 0 and j <= self.ny and k < self.nz and i <= self.nx:
+                beta_sum_x += self.beta_face_x[i, j-1, k]
+                grad_sum_x += self.beta_face_x[i, j-1, k] * self.grad_p_face_x[i, j-1, k]
+            if k > 0 and k <= self.nz and j < self.ny and i <= self.nx:
+                beta_sum_x += self.beta_face_x[i, j, k-1]
+                grad_sum_x += self.beta_face_x[i, j, k-1] * self.grad_p_face_x[i, j, k-1]
+            if j > 0 and k > 0 and j <= self.ny and k <= self.nz and i <= self.nx:
+                beta_sum_x += self.beta_face_x[i, j-1, k-1]
+                grad_sum_x += self.beta_face_x[i, j-1, k-1] * self.grad_p_face_x[i, j-1, k-1]
+            
+            if beta_sum_x > 0:
+                grad_x = grad_sum_x / beta_sum_x
+            
+            # Y-gradient: average over 4 y-faces around the node
+            beta_sum_y = 0.0
+            grad_sum_y = 0.0
+            
+            if i < self.nx and k < self.nz and j <= self.ny:
+                beta_sum_y += self.beta_face_y[i, j, k]
+                grad_sum_y += self.beta_face_y[i, j, k] * self.grad_p_face_y[i, j, k]
+            if i > 0 and i <= self.nx and k < self.nz and j <= self.ny:
+                beta_sum_y += self.beta_face_y[i-1, j, k]
+                grad_sum_y += self.beta_face_y[i-1, j, k] * self.grad_p_face_y[i-1, j, k]
+            if k > 0 and k <= self.nz and i < self.nx and j <= self.ny:
+                beta_sum_y += self.beta_face_y[i, j, k-1]
+                grad_sum_y += self.beta_face_y[i, j, k-1] * self.grad_p_face_y[i, j, k-1]
+            if i > 0 and k > 0 and i <= self.nx and k <= self.nz and j <= self.ny:
+                beta_sum_y += self.beta_face_y[i-1, j, k-1]
+                grad_sum_y += self.beta_face_y[i-1, j, k-1] * self.grad_p_face_y[i-1, j, k-1]
+            
+            if beta_sum_y > 0:
+                grad_y = grad_sum_y / beta_sum_y
+            
+            # Z-gradient: average over 4 z-faces around the node
+            beta_sum_z = 0.0
+            grad_sum_z = 0.0
+            
+            if i < self.nx and j < self.ny and k <= self.nz:
+                beta_sum_z += self.beta_face_z[i, j, k]
+                grad_sum_z += self.beta_face_z[i, j, k] * self.grad_p_face_z[i, j, k]
+            if i > 0 and i <= self.nx and j < self.ny and k <= self.nz:
+                beta_sum_z += self.beta_face_z[i-1, j, k]
+                grad_sum_z += self.beta_face_z[i-1, j, k] * self.grad_p_face_z[i-1, j, k]
+            if j > 0 and j <= self.ny and i < self.nx and k <= self.nz:
+                beta_sum_z += self.beta_face_z[i, j-1, k]
+                grad_sum_z += self.beta_face_z[i, j-1, k] * self.grad_p_face_z[i, j-1, k]
+            if i > 0 and j > 0 and i <= self.nx and j <= self.ny and k <= self.nz:
+                beta_sum_z += self.beta_face_z[i-1, j-1, k]
+                grad_sum_z += self.beta_face_z[i-1, j-1, k] * self.grad_p_face_z[i-1, j-1, k]
+            
+            if beta_sum_z > 0:
+                grad_z = grad_sum_z / beta_sum_z
+            
+            self.grad_p_node[i, j, k] = ti.Vector([grad_x, grad_y, grad_z])
+
+    def compute_node_gradient_gfm(self):
+        """Compute pressure gradient at nodes using GFM (full pipeline)
+        
+        This computes pressure gradient at grid nodes following the paper's method:
+        1. Compute face-center gradients with ghost pressure substitution
+        2. Compute weighted average at nodes using beta weights
+        """
+        self.compute_face_center_gradients_gfm()
+        self.compute_node_pressure_gradient_gfm()
+    
+    def get_node_gradient_numpy(self):
+        """Export node-based pressure gradient as numpy array"""
+        return self.grad_p_node.to_numpy()
 
     @ti.kernel
     def compute_pressure_statistics(self) -> ti.f64:

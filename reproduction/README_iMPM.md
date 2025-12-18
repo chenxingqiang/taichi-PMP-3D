@@ -37,11 +37,17 @@ z = Width (out-of-plane, cross-slope, 2m)
 
 1. **P2G Transfer**: Map particle data to grid
 2. **Prediction Step**: v* = v^n + Δt(g + viscous forces/ρ)
-3. **Level Set Update**: Evolve φ with WENO3/RK3-TVD
-4. **Pressure Solve**: ∇²p = (ρ/Δt)∇·v*
-5. **Correction Step**: v^{n+1} = v* - (Δt/ρ)∇p
-6. **Boundary Conditions**: Apply wall and free surface BCs
-7. **G2P Transfer**: Update particles with mixed PIC/FLIP
+3. **Level Set Update**: Evolve φ with WENO3/RK3-TVD, compute gradients/normals
+4. **Velocity Divergence**: Compute ∇·v* at cell centers using shape function gradients (Eq. 29)
+5. **Pressure Solve** (with GFM, Section 4.3):
+   - Classify cells (fluid/air/solid) from level set
+   - Compute θ values at fluid-air interfaces
+   - Build Laplacian with modified coefficients -(1+1/θ) at interfaces
+   - Solve ∇²p = (ρ/Δt)∇·v* using PCG
+   - Compute node-based pressure gradient with β-weighted face-center averages
+6. **Correction Step**: v^{n+1} = v* - (Δt/ρ)∇p (using GFM node gradient)
+7. **Boundary Conditions**: Apply wall and free surface BCs with hourglass control
+8. **G2P Transfer**: Update particles with mixed PIC/FLIP (Eq. 54)
 
 ## File Structure
 
@@ -71,11 +77,20 @@ reproduction/
    - Implicit pressure correction step
    - Semi-staggered grid layout
 
-2. **Pressure Poisson Solver**
+2. **Pressure Poisson Solver** (Section 4.3 of paper)
    - 7-point finite difference Laplacian (3D)
    - Preconditioned Conjugate Gradient (PCG) method
    - **Enhanced preconditioners**: Modified Incomplete Cholesky (MIC) and SSOR
-   - Ghost Fluid Method for free surface boundary conditions
+   - **Ghost Fluid Method (GFM)** for accurate free surface boundary conditions:
+     - θ-based coefficient modification: Uses θ = |φ_fluid|/(|φ_fluid| + |φ_air|) 
+       to locate interface position
+     - Modified Laplacian: Coefficient becomes -(1 + 1/θ) instead of -2 at fluid-air boundaries
+     - Ghost pressure: p^{Gfix} = (p^{fs} + (θ-1)p^{f})/θ
+     - Smooth pressure transition at interfaces (avoids discontinuity)
+   - **Node-based pressure gradient** (Eq. 47-51):
+     - Face-center gradients with ghost pressure substitution
+     - β-weighted average at nodes: w = β / Σβ where β=1 if adjacent cell is fluid
+     - Handles all interface configurations (Fig. 4 cases a-f)
    - See `PRECONDITIONER_INVESTIGATION.md` for details
 
 3. **Level Set Method**
@@ -97,13 +112,14 @@ reproduction/
 
 1. **Surface Tension Model**
    - Curvature calculation framework in place
-   - Ghost cells support surface pressure jump
+   - Ghost cells support surface pressure jump: p^{fs} = p_air + γκ
    - Least-squares curvature fitting (simplified version)
 
-2. **Boundary Conditions**
-   - Basic no-slip walls implemented
-   - Free surface pressure conditions via GFM
-   - Solid wall penetration conditions
+2. **Boundary Conditions** (Section 4.3-4.4 of paper)
+   - ✓ No-slip walls with Neumann BC (∂p/∂n = 0)
+   - ✓ Free surface pressure via Ghost Fluid Method (θ-based)
+   - ✓ Node-based pressure gradient with β-weighting (Eq. 47-51)
+   - Surface tension contribution to ghost pressure (Eq. 43)
 
 ### ⏳ To Be Completed
 
