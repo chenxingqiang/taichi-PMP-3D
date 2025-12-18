@@ -174,26 +174,84 @@ class IncompressibleMPMSolver:
 
     @ti.kernel
     def compute_velocity_divergence(self):
-        """Compute divergence of intermediate velocity field
+        """Compute divergence of intermediate velocity field at cell centers
+        
+        Uses shape function gradient interpolation from nodes to cell center,
+        following the semi-staggered grid approach (Eq. 29 in paper):
+        
+        ∇·v*_{i,j,k} = Σ_l (∂N_l(x_{cell})/∂x_α) v*_α,l
+        
+        For trilinear interpolation, the cell center is at (i+0.5, j+0.5, k+0.5)*dx
+        and we interpolate from 8 surrounding nodes using linear shape functions.
+        
+        With linear shape functions and cell center at (0.5, 0.5, 0.5) in reference coords:
+        - w = [0.5, 0.5] for each direction (weights for the two nodes in each dir)
+        - grad_w = [-1/dx, 1/dx] for each direction (gradients)
+        """
+        inv_dx = self.inv_dx
+        
+        for i, j, k in self.div_v_star:
+            div_v = 0.0
+            
+            # Cell center is between nodes (i,j,k) and (i+1,j+1,k+1)
+            # Linear shape function weights at cell center (0.5, 0.5, 0.5)
+            # w[0] = 0.5, w[1] = 0.5 in each direction
+            # grad_w[0] = -inv_dx, grad_w[1] = inv_dx in each direction
+            
+            # Loop over 8 nodes surrounding the cell
+            for l in ti.static(range(2)):
+                for m in ti.static(range(2)):
+                    for n in ti.static(range(2)):
+                        # Node index
+                        ni = i + l
+                        nj = j + m
+                        nk = k + n
+                        
+                        # Check bounds
+                        if 0 <= ni < self.nx and 0 <= nj < self.ny and 0 <= nk < self.nz:
+                            # Shape function weights (linear)
+                            w_x = 0.5  # Both nodes have weight 0.5 at cell center
+                            w_y = 0.5
+                            w_z = 0.5
+                            
+                            # Shape function gradients
+                            # For node at l: grad = (2*l - 1) * inv_dx / 2 = (l - 0.5) * inv_dx
+                            # But actually for linear: grad_w[0] = -inv_dx, grad_w[1] = +inv_dx
+                            grad_w_x = (2.0 * l - 1.0) * inv_dx
+                            grad_w_y = (2.0 * m - 1.0) * inv_dx
+                            grad_w_z = (2.0 * n - 1.0) * inv_dx
+                            
+                            # Get velocity at node
+                            v_node = self.grid_v_star[ni, nj, nk]
+                            
+                            # Contribution to divergence: sum of (grad_N · v)
+                            # ∂v_x/∂x contribution
+                            div_v += grad_w_x * w_y * w_z * v_node[0]
+                            # ∂v_y/∂y contribution
+                            div_v += w_x * grad_w_y * w_z * v_node[1]
+                            # ∂v_z/∂z contribution
+                            div_v += w_x * w_y * grad_w_z * v_node[2]
+            
+            self.div_v_star[i, j, k] = div_v
+    
+    @ti.kernel
+    def compute_velocity_divergence_fd(self):
+        """Compute divergence using finite differences (legacy method)
         
         Uses central difference for interior cells and one-sided difference at boundaries.
-        This ensures divergence is computed for all cells including boundary cells.
+        Kept for comparison with shape function method.
         """
         for i, j, k in self.div_v_star:
-            # Compute divergence for all cells using appropriate stencils
             div_x = 0.0
             div_y = 0.0
             div_z = 0.0
             
             # X-direction divergence
             if i == 0:
-                # Forward difference at left boundary
                 div_x = (self.grid_v_star[i+1, j, k][0] - self.grid_v_star[i, j, k][0]) / self.dx
             elif i == self.nx - 1:
-                # Backward difference at right boundary
                 div_x = (self.grid_v_star[i, j, k][0] - self.grid_v_star[i-1, j, k][0]) / self.dx
             else:
-                # Central difference for interior
                 div_x = (self.grid_v_star[i+1, j, k][0] - self.grid_v_star[i-1, j, k][0]) / (2.0 * self.dx)
             
             # Y-direction divergence
@@ -235,27 +293,71 @@ class IncompressibleMPMSolver:
                 self.Ap[i, j, k] = (center + neighbors) / (self.dx * self.dx)
 
     def solve_pressure_pcg(self, max_iter=100, tol=1e-6):
-        """Solve pressure system using Preconditioned Conjugate Gradient"""
+        """Solve pressure system using Preconditioned Conjugate Gradient with GFM
+        
+        Uses Ghost Fluid Method for accurate free surface treatment:
+        - Computes theta values at fluid-air interfaces
+        - Applies modified Laplacian coefficients (-(1+1/θ) instead of -2)
+        - Computes node-based pressure gradients with weighted face-center averages
+        """
         # Update level set and classify cells
         self.pcg_solver.update_level_set(self.level_set_method.phi)
         self.pcg_solver.classify_cells(self.level_set_method.phi)
         self.pcg_solver.update_curvature(self.level_set_method.curvature)
 
-        # Solve using PCG with physical parameters
-        iterations = self.pcg_solver.solve_pcg(self.div_v_star, max_iter, tol, self.rho, self.dt)
+        # Solve using PCG with GFM - pass level set for theta computation
+        iterations = self.pcg_solver.solve_pcg(
+            self.div_v_star, max_iter, tol, self.rho, self.dt,
+            phi=self.level_set_method.phi
+        )
         return iterations
 
     @ti.kernel
     def pressure_correction(self):
-        """Apply pressure correction to get incompressible velocity field
+        """Apply pressure correction to get incompressible velocity field using GFM
         
-        Note: We solve -∇²p = RHS (with negative Laplacian for positive definiteness).
-        This flips the sign of the pressure solution, so we need:
-        v^{n+1} = v* + (dt/ρ) ∇p  (instead of v* - (dt/ρ) ∇p)
+        Uses the node-based pressure gradient computed with Ghost Fluid Method.
+        This provides accurate gradient computation near free surfaces by:
+        1. Using ghost pressure at air cells based on interface position (theta)
+        2. Weighted averaging of face-center gradients at nodes
+        
+        From paper Section 4.3 and Eq. (47-51):
+        - Face-center gradients use ghost pressure at interfaces
+        - Node gradients are weighted averages (β weights based on fluid presence)
+        
+        v^{n+1} = v* - dt/ρ * ∇p
         """
         for i, j, k in self.grid_v:
             if self.grid_m[i, j, k] > 0:
-                # Compute pressure gradient (also handle boundary cells with one-sided differences)
+                # Get the GFM-based pressure gradient at this grid point
+                # The grad_p_node field has shape (nx+1, ny+1, nz+1) for true nodes
+                # Grid velocity is stored at indices (i, j, k) which corresponds to node (i, j, k)
+                # Ensure we're within bounds of the node gradient field
+                grad_p = self.pcg_solver.grad_p_node[i, j, k]
+
+                # Check if this grid point is in fluid region using level set
+                # Level set is defined on nodes, so direct access works
+                phi_curr = self.level_set_method.phi[i, j, k]
+                
+                # Only apply full correction in fluid region (φ < 0)
+                # In air region, reduce or zero the correction
+                if phi_curr < 0:
+                    # Fluid region - apply standard pressure correction
+                    self.grid_v[i, j, k] = self.grid_v_star[i, j, k] - (self.dt / self.rho) * grad_p
+                else:
+                    # Air region - minimal correction (for stability)
+                    self.grid_v[i, j, k] = self.grid_v_star[i, j, k] - (self.dt / self.rho) * 0.1 * grad_p
+    
+    @ti.kernel
+    def pressure_correction_legacy(self):
+        """Legacy pressure correction using cell-center differences (for comparison)
+        
+        This is the old method that uses simple central differences without GFM.
+        Kept for comparison and debugging purposes.
+        """
+        for i, j, k in self.grid_v:
+            if self.grid_m[i, j, k] > 0:
+                # Compute pressure gradient using cell-center pressures
                 grad_p_x = 0.0
                 grad_p_y = 0.0
                 grad_p_z = 0.0
@@ -290,9 +392,7 @@ class IncompressibleMPMSolver:
                 phi_curr = self.level_set_method.phi[i, j, k]
                 beta_weight = 1.0 if phi_curr < 0 else 0.1  # Reduce gradient in air regions
 
-                # v^{n+1} = v* - dt/ρ * β * ∇p  (standard pressure correction)
-                # Even though we solve -∇²p = -ρ/dt * div, the pressure solution has the same
-                # sign as the standard formulation, so we use the standard - sign here.
+                # v^{n+1} = v* - dt/ρ * β * ∇p
                 self.grid_v[i, j, k] = self.grid_v_star[i, j, k] - (self.dt / self.rho) * beta_weight * grad_p
 
     @ti.kernel
