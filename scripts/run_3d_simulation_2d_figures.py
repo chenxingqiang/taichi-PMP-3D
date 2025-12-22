@@ -98,7 +98,7 @@ class TwoPhaseSimulator:
             
             self.dx = 0.005
             self.dt = 1e-5  # Smaller timestep for stability
-            self.total_time = 0.25  # ~2.3 * t_ref for full flow development
+            self.total_time = 0.15  # ~1.4 * t_ref - focus on stable early flow
             
             self.rho_s = 2650.0
             self.rho_f = 1000.0
