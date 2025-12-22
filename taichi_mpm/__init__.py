@@ -19,7 +19,7 @@ Modules:
 Example:
     >>> import taichi as ti
     >>> ti.init(arch=ti.cpu, default_fp=ti.f64)
-    >>> from taichi_mpm import TwoPhaseMPMSolver
+    >>> from taichi_mpm.core import TwoPhaseMPMSolver
     >>> solver = TwoPhaseMPMSolver(nx=100, ny=25, nz=20, dx=0.02)
     >>> solver.init_particles(x_min=0.04, x_max=0.44, y_min=0.04, y_max=0.34, z_min=0.04, z_max=0.44)
     >>> for step in range(1000):
@@ -27,9 +27,17 @@ Example:
 """
 
 __version__ = "0.2.0"
-__author__ = "Chen Xingqiang"
+__author__ = "Xingqiang Chen"
+__email__ = "chen.xingqiang@turingai.cc"
 
-# Lazy imports to avoid Taichi initialization issues
+# Submodule imports (lazy loading for Taichi compatibility)
+from taichi_mpm import core
+from taichi_mpm import solvers
+from taichi_mpm import models
+from taichi_mpm import numerics
+from taichi_mpm import utils
+
+# Convenience imports at package level
 def __getattr__(name):
     """Lazy loading of solver classes to allow Taichi initialization first."""
     if name == "IncompressibleMPMSolver":
@@ -50,10 +58,16 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
+    # Submodules
+    "core",
+    "solvers", 
+    "models",
+    "numerics",
+    "utils",
+    # Core classes
     "IncompressibleMPMSolver",
-    "TwoPhaseMPMSolver", 
+    "TwoPhaseMPMSolver",
     "PCGSolver",
     "LevelSetMethod",
     "BarrierModel",
 ]
-

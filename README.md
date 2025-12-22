@@ -32,7 +32,10 @@ A high-performance implementation of the **Two-Phase Material Point Method (MPM)
 git clone https://github.com/chenxingqiang/Taichi-PMP-3D.git
 cd Taichi-PMP-3D
 
-# Install dependencies
+# Install as package (recommended)
+pip install -e .
+
+# Or install dependencies only
 pip install -r requirements.txt
 ```
 
@@ -49,7 +52,10 @@ pip install -r requirements.txt
 ### Single-Phase Dam Break
 
 ```python
-from src.incompressible_mpm_solver import IncompressibleMPMSolver
+import taichi as ti
+ti.init(arch=ti.cpu, default_fp=ti.f64)
+
+from taichi_mpm.core import IncompressibleMPMSolver
 
 # Create solver
 solver = IncompressibleMPMSolver(
@@ -76,7 +82,10 @@ for step in range(1000):
 ### Two-Phase Debris Flow
 
 ```python
-from src.two_phase_mpm_solver import TwoPhaseMPMSolver
+import taichi as ti
+ti.init(arch=ti.cpu, default_fp=ti.f64)
+
+from taichi_mpm.core import TwoPhaseMPMSolver
 
 # Create two-phase solver
 solver = TwoPhaseMPMSolver(
@@ -111,31 +120,59 @@ for step in range(3000):
 
 ```
 taichi-mpm-3d/
-├── README.md
+├── README.md                       # Project documentation
 ├── LICENSE
 ├── requirements.txt
+├── pyproject.toml                  # Package configuration
 ├── Dockerfile
-├── docs/                           # Documentation
-│   ├── main.pdf                    # Main paper
-│   └── model.pdf                   # Model description
-├── taichi_mpm/                     # Main package (lazy imports)
-│   └── __init__.py
-├── src/                            # Source code
-│   ├── incompressible_mpm_solver.py    # Single-phase iMPM
-│   ├── two_phase_mpm_solver.py         # Two-phase MPM
-│   ├── pcg_solver.py                   # PCG pressure solver
-│   ├── level_set_method.py             # Level set tracking
-│   ├── barrier_model.py                # Barrier contact
-│   ├── run_dam_break_validation.py     # Dam break script
-│   ├── run_ceccato_collapse.py         # Column collapse script
-│   ├── physics_config.yaml             # Parameters
-│   ├── 2phase/                         # Two-phase kernels
-│   │   ├── collapse.py
-│   │   └── drucker_prager_rheology.py
-│   ├── tests/                          # Test suite
-│   └── simulation_output/              # Results
+│
+├── taichi_mpm/                     # Main Python package
+│   ├── __init__.py                 # Package entry point
+│   ├── core/                       # Core MPM solvers
+│   │   ├── __init__.py
+│   │   ├── single_phase_solver.py  # Incompressible MPM
+│   │   └── two_phase_solver.py     # Two-phase MPM
+│   ├── solvers/                    # Linear solvers
+│   │   ├── __init__.py
+│   │   └── pcg_solver.py           # PCG pressure solver
+│   ├── models/                     # Physical models
+│   │   ├── __init__.py
+│   │   ├── barrier.py              # Barrier contact
+│   │   ├── drucker_prager.py       # DP constitutive model
+│   │   └── two_phase_coupling.py   # Coupling kernels
+│   ├── numerics/                   # Numerical methods
+│   │   ├── __init__.py
+│   │   └── level_set.py            # Level set tracking
+│   └── utils/                      # Utilities
+│       ├── __init__.py
+│       ├── data_extractor.py
+│       └── output_metrics.py
+│
+├── scripts/                        # Run scripts
+│   ├── run_dam_break_validation.py
+│   ├── run_ceccato_collapse.py
+│   ├── run_simulation_and_plot.py
+│   └── run_two_phase_simulation.py
+│
+├── configs/                        # Configuration files
+│   ├── physics_config.yaml
+│   └── physics_config_paper_accurate.yaml
+│
 ├── examples/                       # Example scripts
-└── configs/                        # Configuration files
+│   └── dam_break_3d.py
+│
+├── tests/                          # Test suite
+│   ├── conftest.py
+│   ├── unit/
+│   ├── integration/
+│   └── validation/
+│
+├── docs/                           # Documentation
+│   ├── main.pdf
+│   ├── model.pdf
+│   └── design/
+│
+└── output/                         # Simulation outputs (gitignored)
 ```
 
 ## 🔬 Mathematical Framework
@@ -191,7 +228,7 @@ taichi-mpm-3d/
 
 ## ⚙️ Configuration
 
-Physical parameters are defined in `physics_config.yaml`:
+Physical parameters are defined in `configs/physics_config.yaml`:
 
 ```yaml
 solid:
@@ -214,23 +251,25 @@ coupling:
 ## 🧪 Running Tests
 
 ```bash
-cd src
+# Run all tests
 pytest tests/ -v
+
+# Run specific test category
+pytest tests/unit/ -v
+pytest tests/validation/ -v
 ```
 
 ### Validation Scripts
 
 ```bash
-cd src
-
 # Dam break validation
-python run_dam_break_validation.py
+python scripts/run_dam_break_validation.py
 
 # Ceccato column collapse
-python run_ceccato_collapse.py
+python scripts/run_ceccato_collapse.py
 
 # Full simulation with plots
-python run_simulation_and_plot.py
+python scripts/run_simulation_and_plot.py
 ```
 
 ## 📈 Performance
@@ -247,6 +286,12 @@ python run_simulation_and_plot.py
 | `dt` | 1e-4 - 5e-4 s | Time step |
 | `ppc` | 4-8 | Particles per cell |
 | `flip_ratio` | 0.95-0.99 | PIC/FLIP blending |
+
+## 👤 Author
+
+**Xingqiang Chen**
+- Email: chen.xingqiang@turingai.cc
+- GitHub: [@chenxingqiang](https://github.com/chenxingqiang)
 
 ## 📖 References
 
@@ -269,59 +314,6 @@ python run_simulation_and_plot.py
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 附录：论文复现指南
-
-<details>
-<summary>点击展开详细复现流程</summary>
-
-### 一、模型构建与仿真设置
-
-#### 1. 仿真几何与初始条件
-
-- 倾斜渠道坡度：θ = 20°
-- 泥石流体积：500 m³（假设渠道宽度10 m，二维平面应变模型）
-- 初始长深比：L_D / H_D ≈ 8
-- 双刚性屏障高度：H_B = 2 × h_flow
-
-#### 2. 网格与材料点生成
-
-- 背景网格尺寸与屏障高度比：0.04
-- 每网格单元初始生成16个材料点
-- 采用二维平面应变假设
-
-#### 3. 边界条件
-
-- 流体相：自由滑移边界（法向速度为零）
-- 固体相：Coulomb摩擦定律，基底摩擦系数 μ_bed = 0.4
-
-### 二、参数设置（Table 1）
-
-| 参数 | 符号 | 值 | 单位 |
-|------|------|-----|------|
-| 固体密度 | ρ_s | 2650 | kg/m³ |
-| 流体密度 | ρ_f | 1000 | kg/m³ |
-| 流体动力粘度 | η_f | 0.001 | Pa·s |
-| 固体颗粒直径 | d | 1 | mm |
-| 杨氏模量 | E | 10 | MPa |
-| 泊松比 | ν | 0.3 | - |
-| 静态摩擦系数 | μ₁ | 0.49 | - |
-| 极限摩擦系数 | μ₂ | 1.4 | - |
-| 临界固体体积分数 | φ_m | 0.56 | - |
-| dilatancy参数 | K₄ | 4.7 | - |
-| μ(I)参数 | a | 1.23 | - |
-| μ(I)参数 | b | 0.31 | - |
-| 基底摩擦系数 | μ_bed | 0.4 | - |
-
-### 三、仿真流程
-
-1. **自由流动仿真**：获取 h_flow 和 v_flow
-2. **单屏障冲击**：记录冲击力、溢出速度
-3. **双屏障仿真**：分析不同间距下的流体化比率变化
-
-</details>
 
 ---
 
