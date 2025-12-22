@@ -97,8 +97,8 @@ class TwoPhaseSimulator:
             self.domain_width = 0.10
             
             self.dx = 0.005
-            self.dt = 2e-5
-            self.total_time = 0.12  # ~1.1 * t_ref
+            self.dt = 1e-5  # Smaller timestep for stability
+            self.total_time = 0.25  # ~2.3 * t_ref for full flow development
             
             self.rho_s = 2650.0
             self.rho_f = 1000.0
@@ -114,20 +114,20 @@ class TwoPhaseSimulator:
             self.H0 = 0.15          # Water column height (m)
             self.W0 = 0.05          # Column width (m)
             
-            self.domain_length = 0.6
+            self.domain_length = 0.8  # Longer domain for runout
             self.domain_height = 0.30
             self.domain_width = 0.10
             
-            self.dx = 0.006
-            self.dt = 2e-5
-            self.total_time = 0.20
+            self.dx = 0.005  # Finer grid
+            self.dt = 1e-5   # Smaller timestep for stability
+            self.total_time = 0.30  # Longer simulation
             
             self.rho_s = 2000.0     # Lighter for dam break
             self.rho_f = 1000.0
-            self.E_s = 2e4
+            self.E_s = 3e4          # Slightly stiffer
             self.nu_s = 0.3
-            self.friction_angle = 25.0
-            self.phi_s0 = 0.45      # More fluid content
+            self.friction_angle = 22.0  # Lower friction for more flow
+            self.phi_s0 = 0.40      # More fluid content for dam break
             self.d_s = 0.0003
             
         else:
