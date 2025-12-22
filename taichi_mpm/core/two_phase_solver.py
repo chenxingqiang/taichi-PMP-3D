@@ -609,6 +609,10 @@ class TwoPhaseMPMSolver:
             
             # Boundary constraints for particles
             boundary_margin = self.dx * 1.5
+            # Use domain height as upper limit to prevent splashing particles
+            # This is a physical limit - particles shouldn't fly above domain
+            max_height = self.ny * self.dx * 0.7  # 70% of domain height
+            
             for d in ti.static(range(3)):
                 if self.x_s[p][d] < boundary_margin:
                     self.x_s[p][d] = boundary_margin
@@ -618,6 +622,11 @@ class TwoPhaseMPMSolver:
                     self.x_s[p][d] = self.nx * self.dx - boundary_margin
                     if self.v_s[p][d] > 0:
                         self.v_s[p][d] = 0
+                elif d == 1 and self.x_s[p][d] > max_height:
+                    # Force particles back down if they go too high
+                    self.x_s[p][d] = max_height
+                    if self.v_s[p][d] > 0:
+                        self.v_s[p][d] = -0.5 * self.v_s[p][d]  # Reverse and damp
                 elif d == 1 and self.x_s[p][d] > self.ny * self.dx - boundary_margin:
                     self.x_s[p][d] = self.ny * self.dx - boundary_margin
                     if self.v_s[p][d] > 0:
@@ -688,6 +697,9 @@ class TwoPhaseMPMSolver:
             
             # Boundary constraints for particles
             boundary_margin = self.dx * 1.5
+            # Height limit for fluid as well
+            max_height = self.ny * self.dx * 0.7
+            
             for d in ti.static(range(3)):
                 if self.x_f[p][d] < boundary_margin:
                     self.x_f[p][d] = boundary_margin
@@ -697,6 +709,10 @@ class TwoPhaseMPMSolver:
                     self.x_f[p][d] = self.nx * self.dx - boundary_margin
                     if self.v_f[p][d] > 0:
                         self.v_f[p][d] = 0
+                elif d == 1 and self.x_f[p][d] > max_height:
+                    self.x_f[p][d] = max_height
+                    if self.v_f[p][d] > 0:
+                        self.v_f[p][d] = -0.5 * self.v_f[p][d]
                 elif d == 1 and self.x_f[p][d] > self.ny * self.dx - boundary_margin:
                     self.x_f[p][d] = self.ny * self.dx - boundary_margin
                     if self.v_f[p][d] > 0:
