@@ -49,7 +49,7 @@ pip install -r requirements.txt
 ### Single-Phase Dam Break
 
 ```python
-from reproduction.incompressible_mpm_solver import IncompressibleMPMSolver
+from src.incompressible_mpm_solver import IncompressibleMPMSolver
 
 # Create solver
 solver = IncompressibleMPMSolver(
@@ -76,7 +76,7 @@ for step in range(1000):
 ### Two-Phase Debris Flow
 
 ```python
-from reproduction.two_phase_mpm_solver import TwoPhaseMPMSolver
+from src.two_phase_mpm_solver import TwoPhaseMPMSolver
 
 # Create two-phase solver
 solver = TwoPhaseMPMSolver(
@@ -110,17 +110,32 @@ for step in range(3000):
 ## 📁 Project Structure
 
 ```
-reproduction/
-├── incompressible_mpm_solver.py    # Single-phase iMPM solver
-├── two_phase_mpm_solver.py         # Two-phase MPM solver with pressure coupling
-├── pcg_solver.py                   # PCG solver with GFM boundary conditions
-├── level_set_method.py             # Level set tracking (WENO3/RK3-TVD)
-├── barrier_model.py                # Barrier contact mechanics
-├── run_dam_break_validation.py     # Dam break validation script
-├── run_ceccato_collapse.py         # Ceccato column collapse validation
-├── physics_config.yaml             # Physical parameters
-├── tests/                          # Test suite
-└── simulation_output/              # Output files and figures
+taichi-mpm-3d/
+├── README.md
+├── LICENSE
+├── requirements.txt
+├── Dockerfile
+├── docs/                           # Documentation
+│   ├── main.pdf                    # Main paper
+│   └── model.pdf                   # Model description
+├── taichi_mpm/                     # Main package (lazy imports)
+│   └── __init__.py
+├── src/                            # Source code
+│   ├── incompressible_mpm_solver.py    # Single-phase iMPM
+│   ├── two_phase_mpm_solver.py         # Two-phase MPM
+│   ├── pcg_solver.py                   # PCG pressure solver
+│   ├── level_set_method.py             # Level set tracking
+│   ├── barrier_model.py                # Barrier contact
+│   ├── run_dam_break_validation.py     # Dam break script
+│   ├── run_ceccato_collapse.py         # Column collapse script
+│   ├── physics_config.yaml             # Parameters
+│   ├── 2phase/                         # Two-phase kernels
+│   │   ├── collapse.py
+│   │   └── drucker_prager_rheology.py
+│   ├── tests/                          # Test suite
+│   └── simulation_output/              # Results
+├── examples/                       # Example scripts
+└── configs/                        # Configuration files
 ```
 
 ## 🔬 Mathematical Framework
@@ -199,13 +214,15 @@ coupling:
 ## 🧪 Running Tests
 
 ```bash
-cd reproduction
+cd src
 pytest tests/ -v
 ```
 
 ### Validation Scripts
 
 ```bash
+cd src
+
 # Dam break validation
 python run_dam_break_validation.py
 
