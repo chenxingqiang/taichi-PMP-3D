@@ -128,8 +128,8 @@ class DruckerPragerModel:
             # Convert to Cauchy stress
             stress = stress / ti.max(J, 0.01)
         
-        # Limit stress magnitude to avoid explosion
-        stress_max = 1e8  # 100 MPa limit
+        # Limit stress magnitude for granular materials (kPa to low MPa range)
+        stress_max = 1e6  # 1 MPa limit (more realistic for granular flow)
         for i, j in ti.static(ti.ndrange(3, 3)):
             stress[i, j] = ti.max(ti.min(stress[i, j], stress_max), -stress_max)
         
@@ -140,18 +140,23 @@ class DruckerPragerModel:
         """Update elastic deformation gradient with safeguards"""
         # Limit velocity gradient to avoid extreme deformation
         grad_v_limited = grad_v
-        max_grad = 100.0  # Maximum velocity gradient (1/s)
+        max_grad = 50.0  # Maximum velocity gradient (1/s) - reduced for stability
         for i, j in ti.static(ti.ndrange(3, 3)):
             grad_v_limited[i, j] = ti.max(ti.min(grad_v[i, j], max_grad), -max_grad)
         
         delta_F = ti.Matrix.identity(ti.f64, 3) + dt * grad_v_limited
         new_F = delta_F @ self.F_elastic[p]
         
-        # Only update if result is reasonable
+        # Only update if result is reasonable (tighter range for stability)
         new_J = new_F.determinant()
-        if new_J > 0.1 and new_J < 10.0:
+        if new_J > 0.5 and new_J < 2.0:
             self.F_elastic[p] = new_F
             self.J[p] = new_J
+        else:
+            # Reset to identity if deformation is too extreme
+            if new_J <= 0.5 or new_J >= 2.0:
+                self.F_elastic[p] = ti.Matrix.identity(ti.f64, 3)
+                self.J[p] = 1.0
 
 
 @ti.data_oriented
