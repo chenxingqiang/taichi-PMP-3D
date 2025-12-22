@@ -102,11 +102,11 @@ class TwoPhaseSimulator:
             
             self.rho_s = 2650.0
             self.rho_f = 1000.0
-            self.E_s = 5e4
-            self.nu_s = 0.3
-            self.friction_angle = 28.0
-            self.phi_s0 = 0.55
-            self.d_s = 0.0005
+            self.E_s = 2e4           # Lower stiffness for more flow
+            self.nu_s = 0.35         # Slightly higher for more lateral spread
+            self.friction_angle = 22.0  # Lower friction for more flow
+            self.phi_s0 = 0.48       # More fluid content for liquefied flow
+            self.d_s = 0.0003        # Smaller grain size for more fluid-like behavior
             
         elif self.scenario == 'dambreak':
             # Dam Break Simulation
@@ -188,7 +188,7 @@ class TwoPhaseSimulator:
             d_s=self.d_s,
             phi_s0=self.phi_s0,
             g=self.g,
-            flip_ratio=0.90
+            flip_ratio=0.95  # Higher for less numerical viscosity
         )
         
     def initialize_particles(self):
