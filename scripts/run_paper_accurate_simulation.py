@@ -76,39 +76,39 @@ class PaperAccurateSimulator:
         numerics = self.config['numerics']
         
         # Simulation parameters
-        self.total_time = sim['total_time']
-        self.g = sim['gravity']
-        self.slope_angle = sim['slope_angle']  # degrees
+        self.total_time = float(sim['total_time'])
+        self.g = float(sim['gravity'])
+        self.slope_angle = float(sim['slope_angle'])  # degrees
         
         # Domain dimensions
-        self.domain_length = sim['domain_length']
-        self.domain_width = sim['domain_width']
-        self.domain_height = sim['domain_height']
+        self.domain_length = float(sim['domain_length'])
+        self.domain_width = float(sim['domain_width'])
+        self.domain_height = float(sim['domain_height'])
         
         # Initial debris
-        self.debris_length = sim['initial_debris_length']
-        self.debris_height = sim['initial_debris_height']
+        self.debris_length = float(sim['initial_debris_length'])
+        self.debris_height = float(sim['initial_debris_height'])
         self.debris_width = self.domain_width
         
-        # Material properties
-        self.rho_s = solid['density']
-        self.rho_f = fluid['density']
-        self.mu_f = fluid['viscosity']
-        self.E_s = solid['young_modulus']
-        self.nu_s = solid['poisson_ratio']
-        self.phi_s0 = sim['solid_volume_fraction']
-        self.d_s = solid['particle_diameter']
+        # Material properties (convert strings to float if needed)
+        self.rho_s = float(solid['density'])
+        self.rho_f = float(fluid['density'])
+        self.mu_f = float(fluid['viscosity'])
+        self.E_s = float(solid['young_modulus'])
+        self.nu_s = float(solid['poisson_ratio'])
+        self.phi_s0 = float(sim['solid_volume_fraction'])
+        self.d_s = float(solid['particle_diameter'])
         
         # Friction parameters
-        self.mu_static = solid['static_friction']
-        self.mu_dynamic = solid['dynamic_friction']
-        self.basal_friction = solid['basal_friction']
+        self.mu_static = float(solid['static_friction'])
+        self.mu_dynamic = float(solid['dynamic_friction'])
+        self.basal_friction = float(solid['basal_friction'])
         
         # Numerical parameters
-        self.dx = numerics['dx']
-        self.dt = numerics['max_timestep']
-        self.ppc = numerics['particles_per_cell']
-        self.flip_ratio = 1.0 - numerics['pic_flip_ratio']  # Convert PIC ratio to FLIP ratio
+        self.dx = float(numerics['dx'])
+        self.dt = float(numerics['max_timestep'])
+        self.ppc = int(numerics['particles_per_cell'])
+        self.flip_ratio = 1.0 - float(numerics['pic_flip_ratio'])  # Convert PIC ratio to FLIP ratio
         
         # Compute derived parameters
         self.t_ref = np.sqrt(self.debris_height / self.g)
