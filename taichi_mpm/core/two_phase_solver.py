@@ -459,17 +459,17 @@ class TwoPhaseMPMSolver:
                 self.grid_v_f[i, j, k] += self.dt * acc_f
             
             # Limit grid velocity to prevent explosion
-            max_grid_vel = 10.0  # m/s - allow reasonable flow
-            max_upward_vel = 3.0  # m/s - limit upward velocity
+            max_grid_vel = 8.0   # m/s - conservative limit
+            max_upward_vel = 1.5  # m/s - strict upward limit to prevent splashing
             for d in ti.static(range(3)):
                 self.grid_v_s[i, j, k][d] = ti.max(ti.min(self.grid_v_s[i, j, k][d], max_grid_vel), -max_grid_vel)
                 self.grid_v_f[i, j, k][d] = ti.max(ti.min(self.grid_v_f[i, j, k][d], max_grid_vel), -max_grid_vel)
             
-            # Limit upward velocity to prevent particle flying
+            # Strictly limit upward velocity to prevent particle flying
             if self.grid_v_s[i, j, k][1] > max_upward_vel:
-                self.grid_v_s[i, j, k][1] = max_upward_vel
+                self.grid_v_s[i, j, k][1] = max_upward_vel * 0.5  # Strong damping
             if self.grid_v_f[i, j, k][1] > max_upward_vel:
-                self.grid_v_f[i, j, k][1] = max_upward_vel
+                self.grid_v_f[i, j, k][1] = max_upward_vel * 0.5
             
             # Boundary conditions - apply to both phases independently
             boundary_layer = 2  # Boundary layer thickness in cells
@@ -587,10 +587,16 @@ class TwoPhaseMPMSolver:
                 new_v = new_v * (max_vel / vel_mag)
             
             # Strictly limit upward velocity to prevent flying
-            if new_v[1] > 2.0:  # Hard cap for extreme upward
-                new_v[1] = 2.0
-            elif new_v[1] > 1.0:  # Moderate damping for upward
-                new_v[1] = new_v[1] * 0.8
+            if new_v[1] > 1.5:  # Hard cap for extreme upward
+                new_v[1] = 1.5
+            elif new_v[1] > 0.5:  # Strong damping for upward
+                new_v[1] = new_v[1] * 0.6
+            
+            # Also limit v_pic upward velocity (used for position update)
+            if v_pic[1] > 1.5:
+                v_pic[1] = 1.5
+            elif v_pic[1] > 0.5:
+                v_pic[1] = v_pic[1] * 0.6
             
             self.v_s[p] = new_v
             self.C_s[p] = new_C
@@ -598,7 +604,7 @@ class TwoPhaseMPMSolver:
             # Update deformation gradient
             self.solid_model.update_deformation_gradient(p, grad_v, self.dt)
             
-            # Advect position
+            # Advect position using limited velocity
             self.x_s[p] += self.dt * v_pic
             
             # Boundary constraints for particles
@@ -663,15 +669,21 @@ class TwoPhaseMPMSolver:
                 new_v = new_v * (max_vel / vel_mag)
             
             # Strictly limit upward velocity
-            if new_v[1] > 2.0:
-                new_v[1] = 2.0
-            elif new_v[1] > 1.0:
-                new_v[1] = new_v[1] * 0.8
+            if new_v[1] > 1.5:
+                new_v[1] = 1.5
+            elif new_v[1] > 0.5:
+                new_v[1] = new_v[1] * 0.6
+            
+            # Also limit v_pic upward velocity (used for position update)
+            if v_pic[1] > 1.5:
+                v_pic[1] = 1.5
+            elif v_pic[1] > 0.5:
+                v_pic[1] = v_pic[1] * 0.6
             
             self.v_f[p] = new_v
             self.C_f[p] = new_C
             
-            # Advect position
+            # Advect position using limited velocity
             self.x_f[p] += self.dt * v_pic
             
             # Boundary constraints for particles
