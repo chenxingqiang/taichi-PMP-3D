@@ -231,10 +231,12 @@ class TwoPhaseMPMSolver:
         self.grid_phi_s = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # Grid solid fraction
         self.grid_drag = ti.Vector.field(3, dtype=ti.f64, shape=(nx, ny, nz))  # Drag force
         
-        # Initialize Drucker-Prager model (use lower stiffness for stability)
+        # Initialize Drucker-Prager model
         self.solid_model = DruckerPragerModel(
-            max_particles, E=E_s * 0.01, nu=nu_s, friction_angle=friction_angle  # Reduce E by 100x
+            max_particles, E=E_s, nu=nu_s, friction_angle=friction_angle
         )
+        # Initialize F_elastic to identity matrix (MUST be done in Python scope)
+        self.solid_model.initialize()
         
         # Calm period counter (reduce for faster startup)
         self.step_count = ti.field(dtype=ti.i32, shape=())
