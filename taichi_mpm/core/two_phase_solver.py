@@ -459,17 +459,17 @@ class TwoPhaseMPMSolver:
                 self.grid_v_f[i, j, k] += self.dt * acc_f
             
             # Limit grid velocity to prevent explosion
-            max_grid_vel = 12.0  # m/s - reduced for stability
-            max_upward_vel = 5.0  # m/s - limit upward velocity more strictly
+            max_grid_vel = 8.0  # m/s - reduced for stability
+            max_upward_vel = 2.0  # m/s - strictly limit upward velocity
             for d in ti.static(range(3)):
                 self.grid_v_s[i, j, k][d] = ti.max(ti.min(self.grid_v_s[i, j, k][d], max_grid_vel), -max_grid_vel)
                 self.grid_v_f[i, j, k][d] = ti.max(ti.min(self.grid_v_f[i, j, k][d], max_grid_vel), -max_grid_vel)
             
-            # Extra limit on upward velocity to prevent particle flying
+            # Strictly limit upward velocity to prevent particle flying
             if self.grid_v_s[i, j, k][1] > max_upward_vel:
-                self.grid_v_s[i, j, k][1] = max_upward_vel
+                self.grid_v_s[i, j, k][1] = max_upward_vel * 0.5  # Damp more
             if self.grid_v_f[i, j, k][1] > max_upward_vel:
-                self.grid_v_f[i, j, k][1] = max_upward_vel
+                self.grid_v_f[i, j, k][1] = max_upward_vel * 0.5
             
             # Boundary conditions - apply to both phases independently
             boundary_layer = 2  # Boundary layer thickness in cells
@@ -577,18 +577,20 @@ class TwoPhaseMPMSolver:
             new_v = self.flip_ratio * v_flip + (1.0 - self.flip_ratio) * v_pic
             
             # Velocity damping for stability (artificial viscosity)
-            damping = 0.999  # Very light damping
+            damping = 0.998  # Slightly stronger damping
             new_v = new_v * damping
             
             # Limit velocity to avoid explosion
             vel_mag = new_v.norm()
-            max_vel = 10.0  # Reduced for better stability
+            max_vel = 6.0  # More conservative limit
             if vel_mag > max_vel:
                 new_v = new_v * (max_vel / vel_mag)
             
-            # Additional damping for upward velocity to prevent flying
-            if new_v[1] > 3.0:  # If moving up too fast
-                new_v[1] = new_v[1] * 0.8  # Reduce upward velocity
+            # Strictly limit upward velocity to prevent flying
+            if new_v[1] > 1.5:  # If moving up
+                new_v[1] = 1.5  # Hard cap
+            elif new_v[1] > 0.5:  # Moderate upward velocity
+                new_v[1] = new_v[1] * 0.7  # Reduce
             
             self.v_s[p] = new_v
             self.C_s[p] = new_C
@@ -651,18 +653,20 @@ class TwoPhaseMPMSolver:
             new_v = self.flip_ratio * v_flip + (1.0 - self.flip_ratio) * v_pic
             
             # Velocity damping for stability
-            damping = 0.999
+            damping = 0.998
             new_v = new_v * damping
             
             # Limit velocity to avoid explosion
             vel_mag = new_v.norm()
-            max_vel = 10.0  # Reduced for better stability
+            max_vel = 6.0  # More conservative limit
             if vel_mag > max_vel:
                 new_v = new_v * (max_vel / vel_mag)
             
-            # Additional damping for upward velocity to prevent flying
-            if new_v[1] > 3.0:
-                new_v[1] = new_v[1] * 0.8
+            # Strictly limit upward velocity
+            if new_v[1] > 1.5:
+                new_v[1] = 1.5
+            elif new_v[1] > 0.5:
+                new_v[1] = new_v[1] * 0.7
             
             self.v_f[p] = new_v
             self.C_f[p] = new_C
