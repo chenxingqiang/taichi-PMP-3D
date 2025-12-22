@@ -149,14 +149,19 @@ class DruckerPragerModel:
         
         # Only update if result is reasonable (tighter range for stability)
         new_J = new_F.determinant()
-        if new_J > 0.5 and new_J < 2.0:
+        if new_J > 0.6 and new_J < 1.6:
+            # Normal update
             self.F_elastic[p] = new_F
             self.J[p] = new_J
+        elif new_J > 0.4 and new_J < 2.0:
+            # Gradual relaxation toward identity to avoid sudden jumps
+            relax_rate = 0.1
+            self.F_elastic[p] = (1.0 - relax_rate) * new_F + relax_rate * ti.Matrix.identity(ti.f64, 3)
+            self.J[p] = self.F_elastic[p].determinant()
         else:
-            # Reset to identity if deformation is too extreme
-            if new_J <= 0.5 or new_J >= 2.0:
-                self.F_elastic[p] = ti.Matrix.identity(ti.f64, 3)
-                self.J[p] = 1.0
+            # Reset to identity if deformation is extremely out of range
+            self.F_elastic[p] = ti.Matrix.identity(ti.f64, 3)
+            self.J[p] = 1.0
 
 
 @ti.data_oriented
@@ -454,10 +459,17 @@ class TwoPhaseMPMSolver:
                 self.grid_v_f[i, j, k] += self.dt * acc_f
             
             # Limit grid velocity to prevent explosion
-            max_grid_vel = 20.0  # m/s
+            max_grid_vel = 12.0  # m/s - reduced for stability
+            max_upward_vel = 5.0  # m/s - limit upward velocity more strictly
             for d in ti.static(range(3)):
                 self.grid_v_s[i, j, k][d] = ti.max(ti.min(self.grid_v_s[i, j, k][d], max_grid_vel), -max_grid_vel)
                 self.grid_v_f[i, j, k][d] = ti.max(ti.min(self.grid_v_f[i, j, k][d], max_grid_vel), -max_grid_vel)
+            
+            # Extra limit on upward velocity to prevent particle flying
+            if self.grid_v_s[i, j, k][1] > max_upward_vel:
+                self.grid_v_s[i, j, k][1] = max_upward_vel
+            if self.grid_v_f[i, j, k][1] > max_upward_vel:
+                self.grid_v_f[i, j, k][1] = max_upward_vel
             
             # Boundary conditions - apply to both phases independently
             boundary_layer = 2  # Boundary layer thickness in cells
@@ -564,11 +576,19 @@ class TwoPhaseMPMSolver:
             # FLIP/PIC blend
             new_v = self.flip_ratio * v_flip + (1.0 - self.flip_ratio) * v_pic
             
+            # Velocity damping for stability (artificial viscosity)
+            damping = 0.999  # Very light damping
+            new_v = new_v * damping
+            
             # Limit velocity to avoid explosion
             vel_mag = new_v.norm()
-            max_vel = 15.0  # Reduced for column collapse stability
+            max_vel = 10.0  # Reduced for better stability
             if vel_mag > max_vel:
                 new_v = new_v * (max_vel / vel_mag)
+            
+            # Additional damping for upward velocity to prevent flying
+            if new_v[1] > 3.0:  # If moving up too fast
+                new_v[1] = new_v[1] * 0.8  # Reduce upward velocity
             
             self.v_s[p] = new_v
             self.C_s[p] = new_C
@@ -630,11 +650,19 @@ class TwoPhaseMPMSolver:
             # FLIP/PIC blend
             new_v = self.flip_ratio * v_flip + (1.0 - self.flip_ratio) * v_pic
             
+            # Velocity damping for stability
+            damping = 0.999
+            new_v = new_v * damping
+            
             # Limit velocity to avoid explosion
             vel_mag = new_v.norm()
-            max_vel = 15.0  # Reduced for column collapse stability
+            max_vel = 10.0  # Reduced for better stability
             if vel_mag > max_vel:
                 new_v = new_v * (max_vel / vel_mag)
+            
+            # Additional damping for upward velocity to prevent flying
+            if new_v[1] > 3.0:
+                new_v[1] = new_v[1] * 0.8
             
             self.v_f[p] = new_v
             self.C_f[p] = new_C
