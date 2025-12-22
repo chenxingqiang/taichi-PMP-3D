@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Author: Xingqiang Chen
 # Email: chen.xingqiang@turingai.cc
-# Copyright (c) 2024 Xingqiang Chen. All rights reserved.
+# Copyright (c) 2025 Xingqiang Chen. All rights reserved.
 
 """
 Two-Phase Material Point Method (MPM) Solver for Debris Flow Simulation
@@ -573,6 +573,26 @@ class TwoPhaseMPMSolver:
             
             # Advect position
             self.x_s[p] += self.dt * v_pic
+            
+            # Boundary constraints for particles
+            boundary_margin = self.dx * 1.5
+            for d in ti.static(range(3)):
+                if self.x_s[p][d] < boundary_margin:
+                    self.x_s[p][d] = boundary_margin
+                    if self.v_s[p][d] < 0:
+                        self.v_s[p][d] = 0
+                elif d == 0 and self.x_s[p][d] > self.nx * self.dx - boundary_margin:
+                    self.x_s[p][d] = self.nx * self.dx - boundary_margin
+                    if self.v_s[p][d] > 0:
+                        self.v_s[p][d] = 0
+                elif d == 1 and self.x_s[p][d] > self.ny * self.dx - boundary_margin:
+                    self.x_s[p][d] = self.ny * self.dx - boundary_margin
+                    if self.v_s[p][d] > 0:
+                        self.v_s[p][d] = 0
+                elif d == 2 and self.x_s[p][d] > self.nz * self.dx - boundary_margin:
+                    self.x_s[p][d] = self.nz * self.dx - boundary_margin
+                    if self.v_s[p][d] > 0:
+                        self.v_s[p][d] = 0
     
     @ti.kernel
     def g2p_fluid(self):
@@ -616,6 +636,26 @@ class TwoPhaseMPMSolver:
             
             # Advect position
             self.x_f[p] += self.dt * v_pic
+            
+            # Boundary constraints for particles
+            boundary_margin = self.dx * 1.5
+            for d in ti.static(range(3)):
+                if self.x_f[p][d] < boundary_margin:
+                    self.x_f[p][d] = boundary_margin
+                    if self.v_f[p][d] < 0:
+                        self.v_f[p][d] = 0
+                elif d == 0 and self.x_f[p][d] > self.nx * self.dx - boundary_margin:
+                    self.x_f[p][d] = self.nx * self.dx - boundary_margin
+                    if self.v_f[p][d] > 0:
+                        self.v_f[p][d] = 0
+                elif d == 1 and self.x_f[p][d] > self.ny * self.dx - boundary_margin:
+                    self.x_f[p][d] = self.ny * self.dx - boundary_margin
+                    if self.v_f[p][d] > 0:
+                        self.v_f[p][d] = 0
+                elif d == 2 and self.x_f[p][d] > self.nz * self.dx - boundary_margin:
+                    self.x_f[p][d] = self.nz * self.dx - boundary_margin
+                    if self.v_f[p][d] > 0:
+                        self.v_f[p][d] = 0
     
     # ========== Pressure Solver Methods ==========
     

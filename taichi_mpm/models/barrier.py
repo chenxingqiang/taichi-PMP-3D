@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Author: Xingqiang Chen
 # Email: chen.xingqiang@turingai.cc
-# Copyright (c) 2024 Xingqiang Chen. All rights reserved.
+# Copyright (c) 2025 Xingqiang Chen. All rights reserved.
 
 """
 Barrier Model Implementation for Two-Phase MPM Debris Flow Impact
