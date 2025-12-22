@@ -11,8 +11,15 @@ This module contains utility functions:
 - OutputMetrics: Compute and output simulation metrics
 """
 
-from taichi_mpm.utils.data_extractor import DataExtractor
-from taichi_mpm.utils.output_metrics import OutputMetrics
+def __getattr__(name):
+    """Lazy loading for Taichi compatibility."""
+    if name == "DataExtractor":
+        from taichi_mpm.utils.data_extractor import DataExtractor
+        return DataExtractor
+    elif name == "OutputMetrics":
+        from taichi_mpm.utils.output_metrics import OutputMetrics
+        return OutputMetrics
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "DataExtractor",

@@ -30,17 +30,27 @@ __version__ = "0.2.0"
 __author__ = "Xingqiang Chen"
 __email__ = "chen.xingqiang@turingai.cc"
 
-# Submodule imports (lazy loading for Taichi compatibility)
-from taichi_mpm import core
-from taichi_mpm import solvers
-from taichi_mpm import models
-from taichi_mpm import numerics
-from taichi_mpm import utils
-
-# Convenience imports at package level
+# Lazy loading for all submodules (Taichi requires initialization first)
 def __getattr__(name):
-    """Lazy loading of solver classes to allow Taichi initialization first."""
-    if name == "IncompressibleMPMSolver":
+    """Lazy loading of modules and classes to allow Taichi initialization first."""
+    # Submodules
+    if name == "core":
+        from taichi_mpm import core
+        return core
+    elif name == "solvers":
+        from taichi_mpm import solvers
+        return solvers
+    elif name == "models":
+        from taichi_mpm import models
+        return models
+    elif name == "numerics":
+        from taichi_mpm import numerics
+        return numerics
+    elif name == "utils":
+        from taichi_mpm import utils
+        return utils
+    # Core classes
+    elif name == "IncompressibleMPMSolver":
         from taichi_mpm.core.single_phase_solver import IncompressibleMPMSolver
         return IncompressibleMPMSolver
     elif name == "TwoPhaseMPMSolver":
@@ -55,6 +65,9 @@ def __getattr__(name):
     elif name == "BarrierModel":
         from taichi_mpm.models.barrier import BarrierModel
         return BarrierModel
+    elif name == "DruckerPragerRheology":
+        from taichi_mpm.models.drucker_prager import DruckerPragerRheology
+        return DruckerPragerRheology
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [

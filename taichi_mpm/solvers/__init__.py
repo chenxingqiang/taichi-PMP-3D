@@ -10,7 +10,12 @@ This module contains linear solver implementations:
 - PCGSolver: Preconditioned Conjugate Gradient solver for pressure Poisson equation
 """
 
-from taichi_mpm.solvers.pcg_solver import PCGSolver
+def __getattr__(name):
+    """Lazy loading for Taichi compatibility."""
+    if name == "PCGSolver":
+        from taichi_mpm.solvers.pcg_solver import PCGSolver
+        return PCGSolver
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "PCGSolver",

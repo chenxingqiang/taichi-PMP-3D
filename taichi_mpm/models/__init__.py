@@ -8,16 +8,23 @@ Physical Models
 
 This module contains physical model implementations:
 - BarrierModel: Rigid barrier contact mechanics
-- DruckerPragerModel: Drucker-Prager elastoplastic constitutive model
+- DruckerPragerRheology: Drucker-Prager elastoplastic constitutive model
 - TwoPhaseCoupling: Two-phase flow coupling kernels
 """
 
-from taichi_mpm.models.barrier import BarrierModel
-from taichi_mpm.models.drucker_prager import DruckerPragerModel
+def __getattr__(name):
+    """Lazy loading for Taichi compatibility."""
+    if name == "BarrierModel":
+        from taichi_mpm.models.barrier import BarrierModel
+        return BarrierModel
+    elif name == "DruckerPragerRheology":
+        from taichi_mpm.models.drucker_prager import DruckerPragerRheology
+        return DruckerPragerRheology
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "BarrierModel",
-    "DruckerPragerModel",
+    "DruckerPragerRheology",
 ]
 
 
