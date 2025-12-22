@@ -19,7 +19,8 @@ Key validation metrics:
 """
 
 import os
-os.environ['TI_ARCH'] = 'arm64'
+import sys
+import platform
 
 import taichi as ti
 import numpy as np
@@ -30,13 +31,15 @@ from pathlib import Path
 from datetime import datetime
 import time
 
-# Initialize Taichi
-ti.init(arch=ti.cpu, default_fp=ti.f64)
+# Initialize Taichi - use CUDA for GPU (V100), CPU for Mac
+if platform.system() == 'Darwin':
+    ti.init(arch=ti.cpu, default_fp=ti.f64)
+else:
+    ti.init(arch=ti.cuda, default_fp=ti.f32, device_memory_fraction=0.8)
 
 # Import two-phase solver
-import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from two_phase_mpm_solver import TwoPhaseMPMSolver
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from taichi_mpm.core.two_phase_solver import TwoPhaseMPMSolver
 
 
 def run_dam_break_validation():

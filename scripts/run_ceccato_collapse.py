@@ -26,10 +26,16 @@ from matplotlib.patches import Rectangle, Polygon
 import os
 from datetime import datetime
 
-# Initialize Taichi - use CPU with f64 for accuracy (Metal GPU doesn't support f64)
-ti.init(arch=ti.cpu, default_fp=ti.f64)
+# Initialize Taichi - use CUDA for GPU (V100), CPU for Mac
+import platform
+if platform.system() == 'Darwin':
+    ti.init(arch=ti.cpu, default_fp=ti.f64)
+else:
+    ti.init(arch=ti.cuda, default_fp=ti.f32, device_memory_fraction=0.8)
 
-from two_phase_mpm_solver import TwoPhaseMPMSolver
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from taichi_mpm.core.two_phase_solver import TwoPhaseMPMSolver
 
 
 def run_ceccato_simulation():
