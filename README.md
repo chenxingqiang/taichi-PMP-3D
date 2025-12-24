@@ -112,8 +112,11 @@ solver.init_particles(
 for step in range(3000):
     solver.step()  # Includes pressure solve
     
-    # Export results
+    # Export results (includes porosity evolution)
     data = solver.export_particles()
+    # data['solid']['porosity'] - current porosity n
+    # data['solid']['porosity_init'] - initial porosity n0
+    # data['solid']['phi'] - solid volume fraction (1 - n)
 ```
 
 ## 📁 Project Structure
@@ -194,6 +197,31 @@ taichi-mpm-3d/
 ∇·v_f = 0  →  ∇²p = (ρ/Δt)∇·v*
 ```
 
+### Porosity-Based Volume Fraction Evolution
+
+The solver implements a physics-based porosity tracking system that evolves with deformation:
+
+**P2G Stage - Grid Porosity Calculation:**
+```
+n_I^s = (Σ N_{Ip} · m̃^p · n^p) / m̃_I^s
+```
+
+**Volume Fraction Computation:**
+```
+φ_I^s = 1 - n_I^s    (solid volume fraction, if m̃_I^s ≠ 0)
+φ_I^f = 1 - φ_I^s    (fluid volume fraction, if m̃_I^f ≠ 0)
+```
+
+**G2P Stage - Porosity Update from Deformation:**
+```
+n^{t+Δt}_{p,s} = 1 - (1 - n^0_{p,s}) / det(F^{t+Δt}_{p,s})
+```
+
+This formulation ensures:
+- Mass conservation through deformation tracking
+- Proper volume fraction weighting for pressure gradient coupling
+- φ_s + n = 1 constraint maintained throughout simulation
+
 ### Key Components
 
 1. **Pressure Poisson Solver** (PCG with MIC/SSOR preconditioner)
@@ -245,7 +273,7 @@ fluid:
 
 coupling:
   particle_diameter: 0.001  # m
-  initial_porosity: 0.45
+  initial_porosity: 0.45    # n0 = 1 - φ_s0 (evolves with deformation)
 ```
 
 ## 🧪 Running Tests
@@ -318,4 +346,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Last Updated**: December 2024  
-**Status**: Core implementation complete, validation ongoing
+**Status**: Core implementation complete with porosity evolution, validation ongoing

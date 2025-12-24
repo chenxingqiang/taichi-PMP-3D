@@ -215,6 +215,8 @@ class TwoPhaseMPMSolver:
         self.V_s = ti.field(dtype=ti.f64, shape=max_particles)
         self.C_s = ti.Matrix.field(3, 3, dtype=ti.f64, shape=max_particles)
         self.phi_s = ti.field(dtype=ti.f64, shape=max_particles)  # Solid volume fraction
+        self.n_p = ti.field(dtype=ti.f64, shape=max_particles)    # Particle porosity (n)
+        self.n0_p = ti.field(dtype=ti.f64, shape=max_particles)   # Initial particle porosity (n0)
         
         # ========== Fluid Phase Particles ==========
         self.x_f = ti.Vector.field(3, dtype=ti.f64, shape=max_particles)
@@ -238,7 +240,10 @@ class TwoPhaseMPMSolver:
         self.grid_f_f = ti.Vector.field(3, dtype=ti.f64, shape=(nx, ny, nz))
         
         # Coupling fields
-        self.grid_phi_s = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # Grid solid fraction
+        self.grid_n_s = ti.field(dtype=ti.f64, shape=(nx, ny, nz))    # Grid porosity (n_I^s)
+        self.grid_phi_s = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # Grid solid volume fraction (φ_I^s = 1 - n_I^s)
+        self.grid_phi_f = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # Grid fluid volume fraction (φ_I^f = 1 - φ_I^s)
+        self.grid_m_n_sum = ti.field(dtype=ti.f64, shape=(nx, ny, nz))  # Sum of mass-weighted porosity (for averaging)
         self.grid_drag = ti.Vector.field(3, dtype=ti.f64, shape=(nx, ny, nz))  # Drag force
         
         # Initialize Drucker-Prager model
@@ -307,7 +312,13 @@ class TwoPhaseMPMSolver:
                 self.m_s[pid_s] = solid_mass
                 self.V_s[pid_s] = particle_vol * self.phi_s0
                 self.C_s[pid_s] = ti.Matrix.zero(ti.f64, 3, 3)
-                self.phi_s[pid_s] = self.phi_s0
+                # Initialize solid volume fraction and porosity
+                # φ_s = solid volume fraction, n = porosity = 1 - φ_s
+                solid_frac = self.phi_s0
+                porosity = 1.0 - solid_frac
+                self.phi_s[pid_s] = solid_frac
+                self.n0_p[pid_s] = porosity  # Initial porosity (n0)
+                self.n_p[pid_s] = porosity   # Current porosity (n)
             
             # Add fluid particle (co-located)
             if self.n_fluid[None] < self.max_particles:
@@ -339,7 +350,10 @@ class TwoPhaseMPMSolver:
             self.grid_m_f[i, j, k] = 0.0
             self.grid_f_f[i, j, k] = ti.Vector.zero(ti.f64, 3)
             
+            self.grid_n_s[i, j, k] = 0.0
             self.grid_phi_s[i, j, k] = 0.0
+            self.grid_phi_f[i, j, k] = 0.0
+            self.grid_m_n_sum[i, j, k] = 0.0
             self.grid_drag[i, j, k] = ti.Vector.zero(ti.f64, 3)
     
     @ti.kernel
@@ -370,8 +384,9 @@ class TwoPhaseMPMSolver:
                     self.grid_v_s[idx] += weight * (self.m_s[p] * self.v_s[p] + affine @ dpos)
                     self.grid_m_s[idx] += weight * self.m_s[p]
                     
-                    # Solid volume fraction
-                    self.grid_phi_s[idx] += weight * self.phi_s[p]
+                    # Project mass-weighted porosity to grid: Σ N_ip * m̃^p * n^p
+                    # n_I^s = (Σ N_ip * m̃^p * n^p) / m̃_I^s
+                    self.grid_m_n_sum[idx] += weight * self.m_s[p] * self.n_p[p]
                     
                     # Internal force - gradient of B-spline weights
                     # Derivatives: w'[0] = -(1.5-fx), w'[1] = -2(fx-1), w'[2] = (fx-0.5)
@@ -417,10 +432,22 @@ class TwoPhaseMPMSolver:
     def grid_operations(self, gravity_factor: ti.f64):
         """Grid velocity update with gravity, drag, and boundary conditions"""
         for i, j, k in self.grid_m_s:
-            # Normalize solid volume fraction
+            # Compute grid porosity: n_I^s = (Σ m̃^p * n^p) / m̃_I^s
             if self.grid_m_s[i, j, k] > 1e-10:
-                self.grid_phi_s[i, j, k] /= (self.grid_m_s[i, j, k] / (self.rho_s * self.dx**3))
-                self.grid_phi_s[i, j, k] = ti.min(ti.max(self.grid_phi_s[i, j, k], 0.0), 0.65)
+                self.grid_n_s[i, j, k] = self.grid_m_n_sum[i, j, k] / self.grid_m_s[i, j, k]
+                # Clamp porosity to valid range [0, 1]
+                self.grid_n_s[i, j, k] = ti.min(ti.max(self.grid_n_s[i, j, k], 0.0), 0.99)
+                # Compute solid volume fraction: φ_I^s = 1 - n_I^s
+                self.grid_phi_s[i, j, k] = 1.0 - self.grid_n_s[i, j, k]
+            else:
+                self.grid_n_s[i, j, k] = 0.0
+                self.grid_phi_s[i, j, k] = 0.0
+            
+            # Compute fluid volume fraction: φ_I^f = 1 - φ_I^s if fluid mass > 0, else 0
+            if self.grid_m_f[i, j, k] > 1e-10:
+                self.grid_phi_f[i, j, k] = 1.0 - self.grid_phi_s[i, j, k]
+            else:
+                self.grid_phi_f[i, j, k] = 0.0
             
             # Momentum to velocity
             if self.grid_m_s[i, j, k] > 1e-10:
@@ -603,6 +630,17 @@ class TwoPhaseMPMSolver:
             
             # Update deformation gradient
             self.solid_model.update_deformation_gradient(p, grad_v, self.dt)
+            
+            # Update particle porosity from deformation gradient (Eq. from paper):
+            # n^{t+Δt}_{p,s} = 1 - (1 - n^0_{p,s}) / det(F^{t+Δt}_{p,s})
+            # This ensures porosity evolves with volumetric deformation
+            J = self.solid_model.J[p]  # det(F) from DruckerPragerModel
+            if J > 0.01:  # Avoid division by very small J
+                self.n_p[p] = 1.0 - (1.0 - self.n0_p[p]) / J
+                # Clamp porosity to valid range [0, 1)
+                self.n_p[p] = ti.max(0.0, ti.min(self.n_p[p], 0.99))
+                # Update solid volume fraction: φ_s = 1 - n
+                self.phi_s[p] = 1.0 - self.n_p[p]
             
             # Advect position using limited velocity
             self.x_s[p] += self.dt * v_pic
@@ -866,25 +904,30 @@ class TwoPhaseMPMSolver:
     def apply_pressure_gradient(self):
         """Apply pressure gradient to correct velocity field
         
-        For two-phase flow:
-        - Solid phase: v_s -= (dt/ρ_s) * φ * ∇p       [Eq. 5]
-        - Fluid phase: v_f -= (dt/ρ_f) * (1-φ) * ∇p   [Eq. 6]
+        For two-phase flow (from paper equations 5-6):
+        - Solid phase: v_s -= (dt/ρ_s) * φ_s * ∇p_f     [Eq. 5: -φ∇p_f term]
+        - Fluid phase: v_f -= (dt/ρ_f) * φ_f * ∇p_f     [Eq. 6: -(1-φ)∇p_f term]
+        
+        Where:
+        - φ_s = grid_phi_s = 1 - n (solid volume fraction)
+        - φ_f = grid_phi_f = 1 - φ_s = n (fluid volume fraction / porosity)
         
         This enforces incompressibility of the mixture.
         """
         for i, j, k in self.grid_v_f:
             if self.cell_type[i, j, k] == 0:  # Fluid cells only
                 grad_p = self.grid_pressure_grad[i, j, k]
-                phi = self.grid_phi_s[i, j, k]  # Solid volume fraction
+                phi_s = self.grid_phi_s[i, j, k]  # Solid volume fraction (1 - n)
+                phi_f = self.grid_phi_f[i, j, k]  # Fluid volume fraction (n)
                 
-                # Fluid phase correction: v_f -= (dt/ρ_f) * (1-φ) * ∇p
-                phi_l = 1.0 - ti.min(phi, 0.65)  # Liquid fraction (clamp phi)
+                # Fluid phase correction: v_f -= (dt/ρ_f) * φ_f * ∇p
+                # φ_f = 1 - φ_s is fluid volume fraction
                 if self.grid_m_f[i, j, k] > 1e-10:
-                    self.grid_v_f[i, j, k] -= (self.dt / self.rho_f) * phi_l * grad_p
+                    self.grid_v_f[i, j, k] -= (self.dt / self.rho_f) * phi_f * grad_p
                 
-                # Solid phase correction: v_s -= (dt/ρ_s) * φ * ∇p
+                # Solid phase correction: v_s -= (dt/ρ_s) * φ_s * ∇p
                 if self.grid_m_s[i, j, k] > 1e-10:
-                    self.grid_v_s[i, j, k] -= (self.dt / self.rho_s) * phi * grad_p
+                    self.grid_v_s[i, j, k] -= (self.dt / self.rho_s) * phi_s * grad_p
     
     @ti.kernel
     def sync_cell_types(self):
@@ -955,7 +998,9 @@ class TwoPhaseMPMSolver:
             'solid': {
                 'positions': self.x_s.to_numpy()[:n_s],
                 'velocities': self.v_s.to_numpy()[:n_s],
-                'phi': self.phi_s.to_numpy()[:n_s]
+                'phi': self.phi_s.to_numpy()[:n_s],
+                'porosity': self.n_p.to_numpy()[:n_s],      # Current porosity (n)
+                'porosity_init': self.n0_p.to_numpy()[:n_s]  # Initial porosity (n0)
             },
             'fluid': {
                 'positions': self.x_f.to_numpy()[:n_f],
